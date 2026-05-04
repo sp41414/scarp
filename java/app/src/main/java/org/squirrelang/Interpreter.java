@@ -125,7 +125,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitFunctionStmt(Stmt.Function stmt) {
-        SqFunction function = new SqFunction(stmt);
+        SqFunction function = new SqFunction(stmt, environment);
         environment.define(stmt.name.lexeme, function);
         return null;
     }

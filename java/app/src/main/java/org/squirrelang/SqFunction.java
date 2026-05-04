@@ -4,7 +4,10 @@ import java.util.List;
 
 public class SqFunction implements SqCallable {
     private final Stmt.Function declaration;
-    SqFunction(Stmt.Function declaration) {
+    private final Environment closure;
+
+    SqFunction(Stmt.Function declaration, Environment closure) {
+        this.closure = closure;
         this.declaration = declaration;
     }
 
@@ -15,7 +18,7 @@ public class SqFunction implements SqCallable {
 
     @Override
     public Object call(Interpreter interpreter, List<Object> args) {
-        Environment environment = new Environment(interpreter.globals);
+        Environment environment = new Environment(closure);
 
         for (int i = 0; i < declaration.params.size(); i++) {
             environment.define(declaration.params.get(i).lexeme, args.get(i));
