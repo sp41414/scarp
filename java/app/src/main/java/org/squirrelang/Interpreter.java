@@ -186,6 +186,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
         switch (expr.operator.type) {
             case PLUS:
+                checkNumberOperand(expr.operator, right);
                 return +(double) right;
             case MINUS:
                 checkNumberOperand(expr.operator, right);
@@ -407,9 +408,9 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     private void checkNumberOrStringOperands(Token operator, Object left, Object right) {
         if (left instanceof Double && right instanceof Double)
             return;
-        if (left instanceof String || right instanceof String)
+        if (left instanceof String && right instanceof String)
             return;
-        throw new RuntimeError(operator, "Operands must be numbers or strings.");
+        throw new RuntimeError(operator, "Both operands must be numbers or strings.");
     }
 
     private void checkNumberOperands(Token operator, Object left, Object right) {
