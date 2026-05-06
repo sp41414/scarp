@@ -7,7 +7,8 @@ import java.util.Stack;
 
 public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     private final Interpreter interpreter;
-    private Stack<Map<String, Boolean>> scopes = new Stack<>();
+    private final Stack<Map<String, Boolean>> scopes = new Stack<>();
+    private final Map<String, Token> used = new HashMap<>();
     private enum FunctionType {
         NONE,
         FUNCTION
@@ -23,6 +24,13 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         for (Stmt statement : statements) {
             resolve(statement);
         }
+    }
+
+    void reportUnused() {
+        for (Token unused : used.values()) {
+            Squirrelang.error(unused, "Unused variable.");
+        }
+        used.clear();
     }
 
     @Override
@@ -176,6 +184,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         for (int i = scopes.size() - 1; i >= 0; i--) {
             if (scopes.get(i).containsKey(name.lexeme)) {
                 interpreter.resolve(expr, scopes.size() - 1 - i);
+                used.remove(name.lexeme);
                 return;
             }
         }
@@ -231,5 +240,6 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     private void define(Token name) {
         if (scopes.isEmpty()) return;
         scopes.peek().put(name.lexeme, true);
+        used.put(name.lexeme, name);
     }
 }

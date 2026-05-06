@@ -67,6 +67,7 @@ public class Squirrelang {
 
     Resolver resolver = new Resolver(interpreter);
     resolver.resolve(statements);
+    resolver.reportUnused();
 
     if (hadError)
       return;
