@@ -5,21 +5,35 @@ import java.util.Map;
 
 public class SqClass implements SqCallable {
     final String name;
+    final SqClass base;
     private final Map<String, SqFunction> methods;
     private final Map<String, SqFunction> staticMethods;
 
-    SqClass(String name, Map<String, SqFunction> methods, Map<String, SqFunction> staticMethods) {
+    SqClass(String name, SqClass base, Map<String, SqFunction> methods, Map<String, SqFunction> staticMethods) {
+        this.base = base;
         this.name = name;
         this.methods = methods;
         this.staticMethods = staticMethods;
     }
 
     SqFunction findMethod(String name) {
-        return methods.get(name);
+        if (methods.containsKey(name)) {
+            return methods.get(name);
+        }
+        if (base != null) {
+            return base.findMethod(name);
+        }
+        return null;
     }
 
     SqFunction findStaticMethod(String name) {
-        return staticMethods.get(name);
+        if (staticMethods.containsKey(name)) {
+            return staticMethods.get(name);
+        }
+        if (base != null) {
+            return base.findStaticMethod(name);
+        }
+        return null;
     }
 
     @Override

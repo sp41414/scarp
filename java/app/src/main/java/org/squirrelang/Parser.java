@@ -98,6 +98,13 @@ public class Parser {
 
     private Stmt classDeclaration() {
         Token name = consume(IDENTIFIER, "Expect identifier after 'class'.");
+
+        Expr.Variable base = null;
+        if (match(COLON)) {
+            consume(IDENTIFIER, "Expect base class name.");
+            base = new Expr.Variable(previous());
+        }
+
         consume(LEFT_BRACE, "Expect '{' before class body.");
 
         List<Stmt.Function> methods = new ArrayList<>();
@@ -106,7 +113,7 @@ public class Parser {
         }
 
         consume(RIGHT_BRACE, "Expect '}' after class body.");
-        return new Stmt.Class(name, methods);
+        return new Stmt.Class(name, base, methods);
     }
 
     private Stmt statement() {
@@ -497,6 +504,12 @@ public class Parser {
         }
         if (match(SELF)) {
             return new Expr.Self(previous());
+        }
+        if (match(BASE)) {
+            Token keyword = previous();
+            consume(DOT, "Expect '.' after 'base'.");
+            Token method = consume(IDENTIFIER, "Expect base class method name.");
+            return new Expr.Base(keyword, method);
         }
         if (match(LEFT_PAREN)) {
             Expr expr = expression();

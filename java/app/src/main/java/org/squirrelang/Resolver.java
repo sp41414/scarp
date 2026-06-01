@@ -17,7 +17,8 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
     private enum ClassType {
         NONE,
-        CLASS
+        CLASS,
+        SUBCLASS
     }
     private FunctionType currentFunction = FunctionType.NONE;
     private ClassType currentClass = ClassType.NONE;
@@ -82,6 +83,17 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         declare(stmt.name);
         define(stmt.name);
 
+        if (stmt.base != null && stmt.base.name.lexeme.equals(stmt.name.lexeme)) {
+            Squirrelang.error(stmt.base.name, "A class can't inherit from itself.\n       Hint: get some sleep");
+        }
+
+        if (stmt.base != null) {
+            currentClass = ClassType.SUBCLASS;
+            resolve(stmt.base);
+            beginScope();
+            scopes.peek().put("base", true);
+        }
+
         beginScope();
         scopes.peek().put("self", true);
 
@@ -97,6 +109,8 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         }
 
         endScope();
+
+        if (stmt.base != null) endScope();
 
         currentClass = enclosingClass;
         return null;
@@ -200,8 +214,13 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         if (!scopes.isEmpty() && scopes.peek().get(expr.name) == Boolean.FALSE) {
             Squirrelang.error(expr.name, "Can't read local variable in its own initializer.");
         }
+        // Second checks that don't get executed, but are here just in case.
+        // First checks are in visitSelfExpr and visitBaseExpr
         if (expr.name.lexeme.equals("self") && isInStaticMethod) {
             Squirrelang.error(expr.name, "Can't use 'self' inside a static method.");
+        }
+        if (expr.name.lexeme.equals("base") && isInStaticMethod) {
+            Squirrelang.error(expr.name, "Can't use 'base' inside a static method.");
         }
 
         resolveLocal(expr, expr.name);
@@ -232,14 +251,31 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitSelfExpr(Expr.Self expr) {
-        if (isInStaticMethod) {
-            Squirrelang.error(expr.keyword, "Cannot use 'self' inside a static method");
-            return null;
-        }
-        if (currentClass == ClassType.NONE) {
-            Squirrelang.error(expr.keyword, "Cannot use 'self' outside of a class.");
-            return null;
-        }
+        if (isInStaticMethod)
+            Squirrelang.error(expr.keyword,
+                    "Cannot use 'self' inside a static method");
+
+        if (currentClass == ClassType.NONE)
+            Squirrelang.error(expr.keyword,
+                    "Cannot use 'self' outside of a class.");
+
+
+        resolveLocal(expr, expr.keyword);
+        return null;
+    }
+
+    @Override
+    public Void visitBaseExpr(Expr.Base expr) {
+        if (isInStaticMethod)
+            Squirrelang.error(expr.keyword,
+                    "Can't use 'base' inside a static method.");
+        if (currentClass == ClassType.NONE)
+            Squirrelang.error(expr.keyword,
+                    "Can't use 'base' outside a class.");
+        else if (currentClass != ClassType.SUBCLASS)
+            Squirrelang.error(expr.keyword,
+                    "Can't use 'base' in a class with no base class.");
+
 
         resolveLocal(expr, expr.keyword);
         return null;

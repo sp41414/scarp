@@ -141,7 +141,20 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitClassStmt(Stmt.Class stmt) {
+        Object base = null;
+        if (stmt.base != null) {
+            base = evaluate(stmt.base);
+            if (!(base instanceof SqClass)) {
+                throw new RuntimeError(stmt.base.name, "Base class must be a class.");
+            }
+        }
+
         environment.define(stmt.name.lexeme, null);
+
+        if (stmt.base != null) {
+            environment = new Environment(environment);
+            environment.define("base", base);
+        }
 
         Map<String, SqFunction> methods = new HashMap<>();
         Map<String, SqFunction> staticMethods = new HashMap<>();
@@ -152,7 +165,11 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             else
                 methods.put(method.name.lexeme, function);
         }
-        SqClass cls = new SqClass(stmt.name.lexeme, methods, staticMethods);
+        SqClass cls = new SqClass(stmt.name.lexeme, (SqClass)base, methods, staticMethods);
+
+        if (stmt.base != null) {
+            environment = environment.enclosing;
+        }
 
         for (SqFunction method : methods.values()) {
             method.setClosureClass(cls);
@@ -370,6 +387,19 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Object visitSelfExpr(Expr.Self expr) { return lookupVariable(expr.keyword, expr); }
+
+    @Override
+    public Object visitBaseExpr(Expr.Base expr) {
+        int distance = locals.get(expr);
+
+        SqClass base = (SqClass)environment.getAt(distance, "base");
+        SqInstance object = (SqInstance) environment.getAt(distance - 1, "self");
+        SqFunction method = base.findMethod(expr.method.lexeme);
+        if (method == null) throw new RuntimeError(expr.method,
+                "Undefined property '" + expr.method.lexeme + "'.");
+
+        return method.bind(object);
+    }
 
     @Override
     public Object visitLambdaExpr(Expr.Lambda expr) {
