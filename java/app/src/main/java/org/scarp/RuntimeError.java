@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 public class RuntimeError extends RuntimeException {
     final Token token;

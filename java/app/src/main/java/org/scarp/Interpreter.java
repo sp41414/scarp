@@ -1,6 +1,6 @@
-package org.squirrelang;
+package org.scarp;
 
-import static org.squirrelang.TokenType.*;
+import static org.scarp.TokenType.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
-  SqClass currentExecutingClass = null;
+  ScClass currentExecutingClass = null;
   final Environment globals = new Environment();
   private Environment environment = globals;
   private final Map<Expr, Integer> locals = new HashMap<>();
@@ -17,7 +17,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   Interpreter() {
     globals.define(
         "clock",
-        new SqCallable() {
+        new ScCallable() {
           @Override
           public int arity() {
             return 0;
@@ -43,10 +43,10 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         execute(statement);
       }
     } catch (RuntimeError error) {
-      Squirrelang.runtimeError(error);
+      Scarp.runtimeError(error);
     } catch (Break berror) {
       // This error is caught in the resolver, but just in case...
-      Squirrelang.runtimeError(
+      Scarp.runtimeError(
           new RuntimeError(berror.token, "Must be inside loop to use 'break'."));
     }
   }
@@ -133,7 +133,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
   @Override
   public Void visitFunctionStmt(Stmt.Function stmt) {
-    SqFunction function = new SqFunction(stmt, environment, false, Modifiers.NONE);
+    ScFunction function = new ScFunction(stmt, environment, false, Modifiers.NONE);
     environment.define(stmt.name.lexeme, function);
     return null;
   }
@@ -143,17 +143,17 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     Object base = null;
     if (stmt.base != null) {
       base = evaluate(stmt.base);
-      if (!(base instanceof SqClass)) {
+      if (!(base instanceof ScClass)) {
         throw new RuntimeError(stmt.base.name, "Base class must be a class.");
       }
     }
 
-    List<SqClass> mixins = new ArrayList<>();
+    List<ScClass> mixins = new ArrayList<>();
     for (Expr.Variable mixinVar : stmt.mixins) {
       Object mixin = evaluate(mixinVar);
-      if (!(mixin instanceof SqClass))
+      if (!(mixin instanceof ScClass))
         throw new RuntimeError(mixinVar.name, "Mixin must be a class.");
-      mixins.add((SqClass) mixin);
+      mixins.add((ScClass) mixin);
     }
 
     environment.define(stmt.name.lexeme, null);
@@ -163,12 +163,12 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
       environment.define("base", base);
     }
 
-    Map<String, SqFunction> methods = new HashMap<>();
-    Map<String, SqFunction> staticMethods = new HashMap<>();
+    Map<String, ScFunction> methods = new HashMap<>();
+    Map<String, ScFunction> staticMethods = new HashMap<>();
 
-    for (SqClass mixin : mixins) {
-      for (Map.Entry<String, SqFunction> entry : mixin.getMethods().entrySet()) {
-        SqFunction method = entry.getValue();
+    for (ScClass mixin : mixins) {
+      for (Map.Entry<String, ScFunction> entry : mixin.getMethods().entrySet()) {
+        ScFunction method = entry.getValue();
         if ((method.modifiers & Modifiers.PRIVATE) == 0) {
           methods.put(entry.getKey(), method);
         }
@@ -176,22 +176,22 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     }
 
     for (Stmt.Function method : stmt.methods) {
-      SqFunction function =
-          new SqFunction(method, environment, stmt.name.lexeme.equals("init"), method.modifiers);
+      ScFunction function =
+          new ScFunction(method, environment, stmt.name.lexeme.equals("init"), method.modifiers);
       if ((method.modifiers & Modifiers.STATIC) != 0)
         staticMethods.put(method.name.lexeme, function);
       else methods.put(method.name.lexeme, function);
     }
-    SqClass cls = new SqClass(stmt.name.lexeme, (SqClass) base, methods, staticMethods);
+    ScClass cls = new ScClass(stmt.name.lexeme, (ScClass) base, methods, staticMethods);
 
     if (stmt.base != null) {
       environment = environment.enclosing;
     }
 
-    for (SqFunction method : methods.values()) {
+    for (ScFunction method : methods.values()) {
       method.setClosureClass(cls);
     }
-    for (SqFunction staticMethod : staticMethods.values()) {
+    for (ScFunction staticMethod : staticMethods.values()) {
       staticMethod.setClosureClass(cls);
     }
 
@@ -351,7 +351,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
       args.add(evaluate(arg));
     }
 
-    if (!(callee instanceof SqCallable function)) {
+    if (!(callee instanceof ScCallable function)) {
       throw new RuntimeError(expr.paren, "Can only call functions and classes.");
     }
 
@@ -365,18 +365,18 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   @Override
   public Object visitGetExpr(Expr.Get expr) {
     Object object = evaluate(expr.object);
-    if (object instanceof SqClass cls) {
-      SqFunction method = cls.findStaticMethod(expr.name.lexeme);
+    if (object instanceof ScClass cls) {
+      ScFunction method = cls.findStaticMethod(expr.name.lexeme);
       if (method != null) {
         checkPrivacy(method, cls, expr.name);
         return method;
       }
       throw new RuntimeError(expr.name, "Undefined static method '" + expr.name.lexeme + "'.");
     }
-    if (object instanceof SqInstance instance) {
+    if (object instanceof ScInstance instance) {
       Object result = instance.get(expr.name);
 
-      if (result instanceof SqFunction method) {
+      if (result instanceof ScFunction method) {
         checkPrivacy(method, instance.getCls(), expr.name);
         if ((method.modifiers & Modifiers.GETTER) != 0) {
           return method.call(this, null);
@@ -392,12 +392,12 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   @Override
   public Object visitSetExpr(Expr.Set expr) {
     Object object = evaluate(expr.object);
-    if (!(object instanceof SqInstance)) {
+    if (!(object instanceof ScInstance)) {
       throw new RuntimeError(expr.name, "Only instances have fields.");
     }
 
     Object value = evaluate(expr.value);
-    ((SqInstance) object).set(expr.name, value);
+    ((ScInstance) object).set(expr.name, value);
     return value;
   }
 
@@ -410,9 +410,9 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   public Object visitBaseExpr(Expr.Base expr) {
     int distance = locals.get(expr);
 
-    SqClass base = (SqClass) environment.getAt(distance, "base");
-    SqInstance object = (SqInstance) environment.getAt(distance - 1, "self");
-    SqFunction method = base.findMethod(expr.method.lexeme);
+    ScClass base = (ScClass) environment.getAt(distance, "base");
+    ScInstance object = (ScInstance) environment.getAt(distance - 1, "self");
+    ScFunction method = base.findMethod(expr.method.lexeme);
     if (method == null)
       throw new RuntimeError(expr.method, "Undefined property '" + expr.method.lexeme + "'.");
 
@@ -421,7 +421,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
   @Override
   public Object visitLambdaExpr(Expr.Lambda expr) {
-    return new SqFunction(expr.params, expr.body, environment);
+    return new ScFunction(expr.params, expr.body, environment);
   }
 
   private Object evaluate(Expr expr) {
@@ -525,7 +525,7 @@ public class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     throw new RuntimeError(operator, "Operands must be numbers.");
   }
 
-  private void checkPrivacy(SqFunction method, SqClass targetClass, Token name) {
+  private void checkPrivacy(ScFunction method, ScClass targetClass, Token name) {
     if ((method.modifiers & Modifiers.PRIVATE) != 0) {
       if (this.currentExecutingClass != targetClass) {
         throw new RuntimeError(name, "Undefined property '" + name.lexeme + "'.");

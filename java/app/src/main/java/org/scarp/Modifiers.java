@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 public class Modifiers {
     public static final int NONE = 0;

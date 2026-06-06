@@ -1,12 +1,12 @@
-package org.squirrelang;
+package org.scarp;
 
 import static org.junit.Assert.*;
 
 import org.junit.Test;
 
-public class SquirrelangTest {
+public class ScarpTest {
   @Test
-  public void squirrelang() {
+  public void scarp() {
     assertTrue(true);
   }
 }

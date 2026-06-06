@@ -1,4 +1,4 @@
-# Squirrelang
+# Scarp
 A dynamic programming language implementation made in Java and C following the [crafting interpreters](https://craftinginterpreters.com) book.
 
 ## Implementations
@@ -11,5 +11,5 @@ A dynamic programming language implementation made in Java and C following the [
 This version is ready for use. It contains the tree-walk interpreter pipeline, including the scanner, parser, resolver, and runtime environment.
 
 ### C Version
-> [!WARN]
+> [!WARNING]
 > This version is in very early development.

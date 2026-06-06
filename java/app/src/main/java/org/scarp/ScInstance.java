@@ -1,26 +1,26 @@
-package org.squirrelang;
+package org.scarp;
 
 import java.util.HashMap;
 import java.util.Map;
 
-public class SqInstance {
+public class ScInstance {
     private final Map<String, Object> fields = new HashMap<>();
-    private SqClass cls;
+    private ScClass cls;
 
-    SqInstance(SqClass cls) {
+    ScInstance(ScClass cls) {
         this.cls = cls;
     }
 
     Object get(Token name) {
         if (fields.containsKey(name.lexeme))
             return fields.get(name.lexeme);
-        SqFunction method = cls.findMethod(name.lexeme);
+        ScFunction method = cls.findMethod(name.lexeme);
         if (method != null) return method.bind(this);
 
         throw new RuntimeError(name, "Undefined property '" + name.lexeme + "'.");
     }
 
-    SqClass getCls() { return this.cls; }
+    ScClass getCls() { return this.cls; }
     void set(Token name, Object value) {
         fields.put(name.lexeme, value);
     }

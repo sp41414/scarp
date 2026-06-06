@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 class Break extends RuntimeException {
     final Token token;

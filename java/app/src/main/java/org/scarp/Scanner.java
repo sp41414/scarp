@@ -1,6 +1,6 @@
-package org.squirrelang;
+package org.scarp;
 
-import static org.squirrelang.TokenType.*;
+import static org.scarp.TokenType.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -216,7 +216,7 @@ class Scanner {
         } else if (isAlpha(c)) {
           identifier();
         } else {
-          Squirrelang.error(line, column, "Unexpected character: " + c);
+          Scarp.error(line, column, "Unexpected character: " + c);
         }
     }
   }
@@ -224,7 +224,7 @@ class Scanner {
   private void multiLineComment() {
     while (multiLineCommentDepth != 0) {
       if (isAtEnd()) {
-        Squirrelang.error(line, column, "Unterminated multi-line comment.");
+        Scarp.error(line, column, "Unterminated multi-line comment.");
         return;
       }
 
@@ -254,7 +254,7 @@ class Scanner {
     }
 
     if (isAtEnd()) {
-      Squirrelang.error(line, column, "Unterminated string.");
+      Scarp.error(line, column, "Unterminated string.");
       return;
     }
 

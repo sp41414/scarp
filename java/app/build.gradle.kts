@@ -32,7 +32,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass = "org.squirrelang.Squirrelang"
+    mainClass = "org.scarp.Scarp"
 }
 
 tasks.named<JavaExec>("run") {
@@ -42,6 +42,6 @@ tasks.named<JavaExec>("run") {
 
 tasks.jar {
     manifest {
-        attributes["Main-Class"] = "org.squirrelang.Squirrelang"
+        attributes["Main-Class"] = "org.scarp.Scarp"
     }
 }

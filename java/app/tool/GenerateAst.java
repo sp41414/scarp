@@ -1,4 +1,4 @@
-package org.squirrelang.tool;
+package org.scarp.tool;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -45,7 +45,7 @@ public class GenerateAst {
         String path = outputDir + "/" + baseName + ".java";
         PrintWriter fileWriter = new PrintWriter(path, "UTF-8");
 
-        fileWriter.println("package org.squirrelang;");
+        fileWriter.println("package org.scarp;");
         fileWriter.println();
         fileWriter.println("import java.util.List;");
         fileWriter.println();

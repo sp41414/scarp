@@ -14,7 +14,7 @@ cmake --build build -j$(nproc)
 Change the `$(nproc)` to the number of cores you want to use to compile.
 
 ## Running
-The binary can be found at `build/squirrelang`.
+The binary can be found at `build/scarp`.
 ```bash
-./build/squirrelang
+./build/scarp
 ```

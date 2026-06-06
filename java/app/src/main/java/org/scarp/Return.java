@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 class Return extends RuntimeException {
     final Object value;

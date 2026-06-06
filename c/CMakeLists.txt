@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.3)
-project(squirrelang
+project(scarp
     VERSION 0.1
     DESCRIPTION "A VM language implementation in C"
     LANGUAGES C

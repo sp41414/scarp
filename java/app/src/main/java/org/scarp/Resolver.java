@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 import java.util.HashMap;
 import java.util.List;
@@ -38,7 +38,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     void reportUnused() {
         for (Token unused : used.values()) {
-            Squirrelang.error(unused, "Unused variable.");
+            Scarp.error(unused, "Unused variable.");
         }
         used.clear();
     }
@@ -65,7 +65,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     public Void visitFunctionStmt(Stmt.Function stmt) {
         int classModifiers = Modifiers.ALL;
         if ((stmt.modifiers & classModifiers) != 0 && currentClass == ClassType.NONE) {
-            Squirrelang.error(stmt.name, "Cannot use modifier outside of a class.");
+            Scarp.error(stmt.name, "Cannot use modifier outside of a class.");
         }
 
         declare(stmt.name);
@@ -84,7 +84,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         define(stmt.name);
 
         if (stmt.base != null && stmt.base.name.lexeme.equals(stmt.name.lexeme)) {
-            Squirrelang.error(stmt.base.name, "A class can't inherit from itself.\n       Hint: get some sleep");
+            Scarp.error(stmt.base.name, "A class can't inherit from itself.\n       Hint: get some sleep");
         }
 
         if (stmt.base != null) {
@@ -96,7 +96,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
         for (Expr.Variable mixin : stmt.mixins) {
             if (mixin.name.lexeme.equals(stmt.name.lexeme))
-                Squirrelang.error(mixin.name, "A class can't have a mixin of itself.\n       Hint: get some sleep");
+                Scarp.error(mixin.name, "A class can't have a mixin of itself.\n       Hint: get some sleep");
             resolve(mixin);
         }
 
@@ -107,7 +107,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
            FunctionType declaration = FunctionType.METHOD;
            if (method.name.lexeme.equals("init")) {
                if ((method.modifiers & Modifiers.ALL) != 0)
-                   Squirrelang.error(method.name, "Initializer cannot have modifiers.");
+                   Scarp.error(method.name, "Initializer cannot have modifiers.");
                declaration = FunctionType.INITIALIZER;
            }
 
@@ -145,10 +145,10 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     @Override
     public Void visitReturnStmt(Stmt.Return stmt) {
         if (currentFunction == FunctionType.NONE)
-            Squirrelang.error(stmt.keyword, "Can't return from top-level code.");
+            Scarp.error(stmt.keyword, "Can't return from top-level code.");
         if (stmt.value != null) {
             if (currentFunction == FunctionType.INITIALIZER)
-                Squirrelang.error(stmt.keyword, "Can't return a value from an initializer.");
+                Scarp.error(stmt.keyword, "Can't return a value from an initializer.");
             resolve(stmt.value);
         }
 
@@ -167,7 +167,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     @Override
     public Void visitBreakStmt(Stmt.Break stmt) {
         if (loopDepth == 0)
-            Squirrelang.error(stmt.token, "Must be in loop to use 'break'.");
+            Scarp.error(stmt.token, "Must be in loop to use 'break'.");
         return null;
     }
 
@@ -218,15 +218,15 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     @Override
     public Void visitVariableExpr(Expr.Variable expr) {
         if (!scopes.isEmpty() && scopes.peek().get(expr.name) == Boolean.FALSE) {
-            Squirrelang.error(expr.name, "Can't read local variable in its own initializer.");
+            Scarp.error(expr.name, "Can't read local variable in its own initializer.");
         }
         // Second checks that don't get executed, but are here just in case.
         // First checks are in visitSelfExpr and visitBaseExpr
         if (expr.name.lexeme.equals("self") && isInStaticMethod) {
-            Squirrelang.error(expr.name, "Can't use 'self' inside a static method.");
+            Scarp.error(expr.name, "Can't use 'self' inside a static method.");
         }
         if (expr.name.lexeme.equals("base") && isInStaticMethod) {
-            Squirrelang.error(expr.name, "Can't use 'base' inside a static method.");
+            Scarp.error(expr.name, "Can't use 'base' inside a static method.");
         }
 
         resolveLocal(expr, expr.name);
@@ -235,7 +235,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitAssignExpr(Expr.Assign expr) {
-        if (isInGetterMethod) Squirrelang.error(expr.name, "Cannot mutate state inside a getter.");
+        if (isInGetterMethod) Scarp.error(expr.name, "Cannot mutate state inside a getter.");
         resolve(expr.value);
         resolveLocal(expr, expr.name);
         return null;
@@ -249,7 +249,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitSetExpr(Expr.Set expr) {
-        if (isInGetterMethod) Squirrelang.error(expr.name, "Cannot mutate state inside a getter.");
+        if (isInGetterMethod) Scarp.error(expr.name, "Cannot mutate state inside a getter.");
         resolve(expr.object);
         resolve(expr.value);
         return null;
@@ -258,11 +258,11 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     @Override
     public Void visitSelfExpr(Expr.Self expr) {
         if (isInStaticMethod)
-            Squirrelang.error(expr.keyword,
+            Scarp.error(expr.keyword,
                     "Cannot use 'self' inside a static method");
 
         if (currentClass == ClassType.NONE)
-            Squirrelang.error(expr.keyword,
+            Scarp.error(expr.keyword,
                     "Cannot use 'self' outside of a class.");
 
 
@@ -273,13 +273,13 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     @Override
     public Void visitBaseExpr(Expr.Base expr) {
         if (isInStaticMethod)
-            Squirrelang.error(expr.keyword,
+            Scarp.error(expr.keyword,
                     "Can't use 'base' inside a static method.");
         if (currentClass == ClassType.NONE)
-            Squirrelang.error(expr.keyword,
+            Scarp.error(expr.keyword,
                     "Can't use 'base' outside a class.");
         else if (currentClass != ClassType.SUBCLASS)
-            Squirrelang.error(expr.keyword,
+            Scarp.error(expr.keyword,
                     "Can't use 'base' in a class with no base class.");
 
 
@@ -357,7 +357,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         if (scopes.isEmpty()) return;
         Map<String, Boolean> scope = scopes.peek();
         if (scope.containsKey(name.lexeme)) {
-            Squirrelang.error(name, "Already a variable with this name in this scope.");
+            Scarp.error(name, "Already a variable with this name in this scope.");
         }
         scope.put(name.lexeme, false);
     }

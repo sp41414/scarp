@@ -383,7 +383,7 @@ Declare variables using the `let` keyword. Variables without an explicit initial
 
 ```swift
 let x = 10;
-let name = "Squirrel";
+let name = "Mohammed Avdol";
 let uninitialized;
 
 // error: Cannot reference uninitialized variable 'uninitialized'.
@@ -392,7 +392,7 @@ let uninitialized;
 // 10
 print x;
 
-// Squirrel
+// Mohammed Avdol
 print name;
 
 uninitialized = "Initialized";

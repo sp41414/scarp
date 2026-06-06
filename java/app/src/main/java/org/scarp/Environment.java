@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 import java.util.HashMap;
 import java.util.Map;

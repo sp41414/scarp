@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -8,7 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 
-public class Squirrelang {
+public class Scarp {
   private static final String RESET = "\033[0m";
   private static final String RED = "\033[1;31m";
   private static final String BLUE = "\033[1;34m";
@@ -20,7 +20,7 @@ public class Squirrelang {
 
   public static void main(String[] args) throws IOException {
     if (args.length > 1) {
-      System.out.println("Usage: java Squirrelang <file>");
+      System.out.println("Usage: java Scarp <file>");
       System.exit(64);
     } else if (args.length == 1) {
       runFile(args[0]);

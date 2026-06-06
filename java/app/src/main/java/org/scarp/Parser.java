@@ -1,6 +1,6 @@
-package org.squirrelang;
+package org.scarp;
 
-import static org.squirrelang.TokenType.*;
+import static org.scarp.TokenType.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -532,7 +532,7 @@ public class Parser {
   }
 
   private ParseError error(Token token, String message) {
-    Squirrelang.error(token, message);
+    Scarp.error(token, message);
     return new ParseError();
   }
 

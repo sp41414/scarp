@@ -1,4 +1,4 @@
-package org.squirrelang;
+package org.scarp;
 
 class Token {
   final TokenType type;

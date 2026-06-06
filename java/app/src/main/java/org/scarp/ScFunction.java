@@ -1,22 +1,22 @@
-package org.squirrelang;
+package org.scarp;
 
 import java.util.List;
 
-public class SqFunction implements SqCallable {
+public class ScFunction implements ScCallable {
     final int modifiers;
     private final Stmt.Function declaration;
     private final Environment closure;
     private final boolean isInitializer;
-    private SqClass closureClass;
+    private ScClass closureClass;
 
-    SqFunction(List<Token> params, List<Stmt> body, Environment closure) {
+    ScFunction(List<Token> params, List<Stmt> body, Environment closure) {
         this.closure = closure;
         this.declaration = new Stmt.Function(Modifiers.NONE, null, params, body);
         this.isInitializer = false;
         this.modifiers = Modifiers.NONE;
     }
 
-    SqFunction(Stmt.Function declaration, Environment closure, boolean isInitializer, int modifiers) {
+    ScFunction(Stmt.Function declaration, Environment closure, boolean isInitializer, int modifiers) {
         this.closure = closure;
         this.declaration = declaration;
         this.isInitializer = isInitializer;
@@ -36,7 +36,7 @@ public class SqFunction implements SqCallable {
             environment.define(declaration.params.get(i).lexeme, args.get(i));
         }
 
-        SqClass enclosingClass = interpreter.currentExecutingClass;
+        ScClass enclosingClass = interpreter.currentExecutingClass;
         try {
             interpreter.currentExecutingClass = this.closureClass;
             interpreter.executeBlock(declaration.body, environment);
@@ -51,15 +51,15 @@ public class SqFunction implements SqCallable {
         return null;
     }
 
-    SqFunction bind(SqInstance instance) {
+    ScFunction bind(ScInstance instance) {
         Environment environment = new Environment(closure);
         environment.define("self", instance);
-        SqFunction bound = new SqFunction(declaration, environment, isInitializer, modifiers);
+        ScFunction bound = new ScFunction(declaration, environment, isInitializer, modifiers);
         bound.setClosureClass(this.closureClass);
         return bound;
     }
 
-    void setClosureClass(SqClass closureClass) {
+    void setClosureClass(ScClass closureClass) {
         this.closureClass = closureClass;
     }
 
