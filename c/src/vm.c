@@ -4,19 +4,39 @@
 #include "debug.h"
 #include "value.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 VM vm;
 
-void initVM() {}
+static void resetStack(void) { vm.stackTop = vm.stack; }
 
-void freeVM() {}
+void initVM(void) { resetStack(); }
 
-static InterpretResult run() {
+void freeVM(void) {}
+
+void push(Value value) {
+  *vm.stackTop = value;
+  vm.stackTop++;
+}
+
+Value pop(void) {
+  vm.stackTop--;
+  return *vm.stackTop;
+}
+
+static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+#define BINARY_OP(op)                                                          \
+  do {                                                                         \
+    double b = pop();                                                          \
+    double a = pop();                                                          \
+    push(a op b);                                                              \
+  } while (false)
 
   for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
+    traceStack(&vm);
     disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
 #endif
 
@@ -25,11 +45,28 @@ static InterpretResult run() {
     case OP_CONSTANT_LONG:
     case OP_CONSTANT: {
       Value constant = READ_CONSTANT();
-      printValue(constant);
-      printf("\n");
+      push(constant);
       break;
     }
+    case OP_NEGATE:
+      push(-pop());
+      break;
+    case OP_ADD:
+      BINARY_OP(+);
+      break;
+    case OP_SUBTRACT:
+      BINARY_OP(-);
+      break;
+    case OP_DIVIDE:
+      BINARY_OP(/);
+      break;
+    case OP_MULTIPLY:
+      BINARY_OP(*);
+      break;
     case OP_RETURN: {
+      printf("Popped: ");
+      printValue(pop());
+      printf("\n");
       return INTERPRET_OK;
     }
     }
@@ -37,6 +74,7 @@ static InterpretResult run() {
 
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef BINARY_OP
 }
 
 InterpretResult interpret(Chunk *chunk) {

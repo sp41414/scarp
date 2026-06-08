@@ -1,5 +1,4 @@
 #include "chunk.h"
-#include "debug.h"
 #include "vm.h"
 int main(int argc, const char **argv) {
   initVM();
@@ -15,6 +14,19 @@ int main(int argc, const char **argv) {
   writeChunk(&chunk, OP_CONSTANT_LONG, 69420, 68);
   writeChunk(&chunk, longConstant, 69420, 69);
 
+  constant = addConstant(&chunk, 3.4);
+  writeChunk(&chunk, OP_CONSTANT, 123, 1234);
+  writeChunk(&chunk, constant, 123, 1234);
+
+  writeChunk(&chunk, OP_ADD, 123, 1234);
+
+  constant = addConstant(&chunk, 5.6);
+  writeChunk(&chunk, OP_CONSTANT, 123, 1234);
+  writeChunk(&chunk, constant, 123, 1234);
+
+  writeChunk(&chunk, OP_DIVIDE, 123, 1234);
+
+  writeChunk(&chunk, OP_NEGATE, 123, 1234);
   writeChunk(&chunk, OP_RETURN, 69420, 1000);
   interpret(&chunk);
   freeVM();
