@@ -17,11 +17,6 @@ set(CMAKE_C_EXTENSIONS OFF)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Version:    ${PROJECT_VERSION}")
 
-file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
-if(EXISTS "${LOC_PATH}")
-    message(FATAL_ERROR "Insource builds are not allowed. Use a build/ subdirectory or add the -B build/ flag.")
-endif()
-
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/*.c"
 )
