@@ -4,7 +4,7 @@ This is the bytecode VM language implementation in C.
 
 ## Prerequisites
 - CMake 4.3 or higher
-- A C23 compiler
+- A C17 compiler
 
 ## Building
 ```bash

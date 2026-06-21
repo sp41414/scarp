@@ -18,20 +18,21 @@ typedef struct {
 
 typedef enum {
   PREC_NONE,
-  PREC_ASSIGNMENT,  // =
-  PREC_CONDITIONAL, // ? :
-  PREC_OR_OR,       // ||
-  PREC_AND_AND,     // &&
-  PREC_OR,          // |
-  PREC_XOR,         // ^
-  PREC_AND,         // &
-  PREC_EQUALITY,    // == !=
-  PREC_COMPARISON,  // < > <= >=
-  PREC_SHIFT,       // >> << >>>
-  PREC_TERM,        // + -
-  PREC_FACTOR,      // * /
-  PREC_UNARY,       // ! -
-  PREC_CALL,        // . ()
+  PREC_ASSIGNMENT, // =
+  // TODO:
+  // PREC_CONDITIONAL, // ? :
+  PREC_OR_OR,      // ||
+  PREC_AND_AND,    // &&
+  PREC_OR,         // |
+  PREC_XOR,        // ^
+  PREC_AND,        // &
+  PREC_EQUALITY,   // == !=
+  PREC_COMPARISON, // < > <= >=
+  PREC_SHIFT,      // >> << >>>
+  PREC_TERM,       // + -
+  PREC_FACTOR,     // * /
+  PREC_UNARY,      // ! -
+  PREC_CALL,       // . ()
   PREC_PRIMARY
 } Precedence;
 
@@ -56,9 +57,6 @@ static void errorAt(Token *token, const char *message) {
   if (parser.panicMode)
     return;
   parser.panicMode = true;
-  const char *BOLD = "\x1b[1m";
-  const char *RED_BOLD = "\x1b[1;31m";
-  const char *RESET = "\x1b[0m";
 
   fprintf(stderr, "%s%d:%d%s:%s ", BOLD, token->line, token->column,
           token->type == TOKEN_EOF ? ", at end" : "", RESET);
@@ -99,10 +97,9 @@ static void emitByte(uint8_t byte) {
              parser.previous.column);
 }
 
-static void emitBytes(uint8_t *bytes, size_t size) {
-  for (size_t i = 0; i < size; i++) {
-    emitByte(bytes[i]);
-  }
+static void emitBytes(uint8_t byte1, uint8_t byte2) {
+  emitByte(byte1);
+  emitByte(byte2);
 }
 
 static void emitReturn(void) { emitByte(OP_RETURN); }
@@ -110,12 +107,9 @@ static void emitReturn(void) { emitByte(OP_RETURN); }
 static void emitConstant(Value value) {
   int constant = addConstant(currentChunk(), value);
   if (constant <= UINT8_MAX) {
-    uint8_t bytes[2] = {OP_CONSTANT, (uint8_t)constant};
-    emitBytes(bytes, 2);
+    emitBytes(OP_CONSTANT, (uint8_t)constant);
   } else if (constant <= UINT16_MAX) {
-    uint8_t bytes[3] = {OP_CONSTANT_LONG, (uint8_t)(constant & 0xff),
-                        (uint8_t)((constant >> 8) & 0xff)};
-    emitBytes(bytes, 3);
+    emitByte((uint8_t)((constant >> 8) & 0xff));
   } else {
     error("Too many constants in one chunk.");
   }
@@ -132,7 +126,7 @@ static void endCompiler(void) {
 
 static void number(void) {
   double value = strtod(parser.previous.start, NULL);
-  emitConstant(value);
+  emitConstant(NUMBER_VAL(value));
 }
 
 static void grouping(void) {
@@ -145,8 +139,27 @@ static void unary(void) {
   parsePrecedence(PREC_UNARY);
 
   switch (operatorType) {
+  case TOKEN_BANG:
+    emitByte(OP_NOT);
+    break;
   case TOKEN_MINUS:
     emitByte(OP_NEGATE);
+    break;
+  default:
+    return;
+  }
+}
+
+static void literal(void) {
+  switch (parser.previous.type) {
+  case TOKEN_NIL:
+    emitByte(OP_NIL);
+    break;
+  case TOKEN_FALSE:
+    emitByte(OP_FALSE);
+    break;
+  case TOKEN_TRUE:
+    emitByte(OP_TRUE);
     break;
   default:
     return;
@@ -159,6 +172,24 @@ static void binary(void) {
   parsePrecedence((Precedence)(rule->precedence + 1));
 
   switch (operatorType) {
+  case TOKEN_BANG_EQUAL:
+    emitBytes(OP_EQUAL, OP_NOT);
+    break;
+  case TOKEN_EQUAL_EQUAL:
+    emitByte(OP_EQUAL);
+    break;
+  case TOKEN_GREATER:
+    emitByte(OP_GREATER);
+    break;
+  case TOKEN_GREATER_EQUAL:
+    emitBytes(OP_LESS, OP_NOT);
+    break;
+  case TOKEN_LESS:
+    emitByte(OP_LESS);
+    break;
+  case TOKEN_LESS_EQUAL:
+    emitBytes(OP_GREATER, OP_NOT);
+    break;
   case TOKEN_PLUS:
     emitByte(OP_ADD);
     break;
@@ -190,14 +221,14 @@ ParseRule rules[] = {
     [TOKEN_STAR] = {NULL, binary, PREC_FACTOR},
     [TOKEN_QUESTION] = {NULL, NULL, PREC_NONE},
     [TOKEN_COLON] = {NULL, NULL, PREC_NONE},
-    [TOKEN_BANG] = {NULL, NULL, PREC_NONE},
-    [TOKEN_BANG_EQUAL] = {NULL, NULL, PREC_NONE},
+    [TOKEN_BANG] = {unary, NULL, PREC_NONE},
+    [TOKEN_BANG_EQUAL] = {NULL, binary, PREC_EQUALITY},
     [TOKEN_EQUAL] = {NULL, NULL, PREC_NONE},
-    [TOKEN_EQUAL_EQUAL] = {NULL, NULL, PREC_NONE},
-    [TOKEN_GREATER] = {NULL, NULL, PREC_NONE},
-    [TOKEN_GREATER_EQUAL] = {NULL, NULL, PREC_NONE},
-    [TOKEN_LESS] = {NULL, NULL, PREC_NONE},
-    [TOKEN_LESS_EQUAL] = {NULL, NULL, PREC_NONE},
+    [TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_EQUALITY},
+    [TOKEN_GREATER] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_AND_AND] = {NULL, NULL, PREC_NONE},
     [TOKEN_OR_OR] = {NULL, NULL, PREC_NONE},
     [TOKEN_AND] = {NULL, NULL, PREC_NONE},
@@ -212,16 +243,16 @@ ParseRule rules[] = {
     [TOKEN_NUMBER] = {number, NULL, PREC_NONE},
     [TOKEN_CLASS] = {NULL, NULL, PREC_NONE},
     [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
-    [TOKEN_FALSE] = {NULL, NULL, PREC_NONE},
+    [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
     [TOKEN_FOR] = {NULL, NULL, PREC_NONE},
     [TOKEN_FUNCTION] = {NULL, NULL, PREC_NONE},
     [TOKEN_IF] = {NULL, NULL, PREC_NONE},
-    [TOKEN_NIL] = {NULL, NULL, PREC_NONE},
+    [TOKEN_NIL] = {literal, NULL, PREC_NONE},
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
     [TOKEN_BASE] = {NULL, NULL, PREC_NONE},
     [TOKEN_SELF] = {NULL, NULL, PREC_NONE},
-    [TOKEN_TRUE] = {NULL, NULL, PREC_NONE},
+    [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_LET] = {NULL, NULL, PREC_NONE},
     [TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
     [TOKEN_ERROR] = {NULL, NULL, PREC_NONE},
