@@ -97,6 +97,23 @@ static void concatenate(void) {
   push(OBJ_VAL(result));
 }
 
+static inline InterpretResult comparison(uint8_t op) {
+  if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {
+    ObjString *b = AS_STRING(pop());
+    ObjString *a = AS_STRING(pop());
+    int cmp = strcmp(a->chars, b->chars);
+    push(BOOL_VAL(op == OP_GREATER ? cmp > 0 : cmp < 0));
+  } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
+    double b = AS_NUMBER(pop());
+    double a = AS_NUMBER(pop());
+    push(BOOL_VAL(op == OP_GREATER ? a > b : a < b));
+  } else {
+    runtimeError("Operands must be two numbers or two strings.");
+    return INTERPRET_RUNTIME_ERROR;
+  }
+  return INTERPRET_OK;
+}
+
 static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
@@ -106,24 +123,10 @@ static InterpretResult run(void) {
       runtimeError("Operands must be numbers.");                               \
       return INTERPRET_RUNTIME_ERROR;                                          \
     }                                                                          \
-    double b = AS_NUMBER(pop());                                               \
-    double a = AS_NUMBER(pop());                                               \
+    double b = AS_NUMBER(peek(0));                                             \
+    double a = AS_NUMBER(peek(1));                                             \
+    vm.stackTop -= 2;                                                          \
     push(valueType(a op b));                                                   \
-  } while (false)
-#define COMPARISON(op)                                                         \
-  do {                                                                         \
-    if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {                            \
-      ObjString *b = AS_STRING(pop());                                         \
-      ObjString *a = AS_STRING(pop());                                         \
-      push(BOOL_VAL(strcmp(a->chars, b->chars) op 0));                         \
-    } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {                     \
-      double b = AS_NUMBER(pop());                                             \
-      double a = AS_NUMBER(pop());                                             \
-      push(BOOL_VAL(a op b));                                                  \
-    } else {                                                                   \
-      runtimeError("Operands must be two numbers or two strings.");            \
-      return INTERPRET_RUNTIME_ERROR;                                          \
-    }                                                                          \
   } while (false)
 
   for (;;) {
@@ -159,10 +162,10 @@ static InterpretResult run(void) {
       break;
     }
     case OP_GREATER:
-      COMPARISON(>);
-      break;
     case OP_LESS:
-      COMPARISON(<);
+      if (comparison(instruction) == INTERPRET_RUNTIME_ERROR) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
       break;
     case OP_NEGATE:
       if (!IS_NUMBER(peek(0))) {
@@ -205,7 +208,6 @@ static InterpretResult run(void) {
 #undef READ_BYTE
 #undef READ_CONSTANT
 #undef BINARY_OP
-#undef COMPARISON
 }
 
 InterpretResult interpret(const char *source) {
