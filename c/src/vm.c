@@ -3,10 +3,13 @@
 #include "common.h"
 #include "compiler.h"
 #include "debug.h"
+#include "memory.h"
+#include "object.h"
 #include "value.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 VM vm;
 
@@ -27,9 +30,12 @@ static void runtimeError(const char *fmt, ...) {
   resetStack();
 }
 
-void initVM(void) { resetStack(); }
+void initVM(void) {
+  resetStack();
+  vm.objects = NULL;
+}
 
-void freeVM(void) {}
+void freeVM(void) { freeObjects(); }
 
 void push(Value value) {
   if (vm.stackTop >= &vm.stack[STACK_MAX]) {
@@ -49,6 +55,46 @@ static Value peek(int distance) { return vm.stackTop[-1 - distance]; }
 
 static bool isFalsey(Value value) {
   return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
+}
+
+static ObjString *stringify(Value value) {
+  if (IS_NIL(value)) {
+    return copyString("nil", 3);
+  }
+  if (IS_BOOL(value)) {
+    return AS_BOOL(value) ? copyString("true", 4) : copyString("false", 5);
+  }
+  if (IS_NUMBER(value)) {
+    double num = AS_NUMBER(value);
+
+    char buf[32];
+    int length = snprintf(buf, sizeof(buf), "%g", num);
+
+    return copyString(buf, length);
+  }
+  if (IS_STRING(value)) {
+    return AS_STRING(value);
+  }
+
+  runtimeError("Unknown type passed to stringify().");
+  exit(1);
+}
+
+static void concatenate(void) {
+  Value bValue = pop();
+  Value aValue = pop();
+
+  ObjString *b = IS_STRING(bValue) ? AS_STRING(bValue) : stringify(bValue);
+  ObjString *a = IS_STRING(aValue) ? AS_STRING(aValue) : stringify(aValue);
+
+  int length = a->length + b->length;
+  char *chars = ALLOCATE(char, length + 1);
+  memcpy(chars, a->chars, a->length);
+  memcpy(chars + a->length, b->chars, b->length);
+  chars[length] = '\0';
+
+  ObjString *result = takeString(chars, length);
+  push(OBJ_VAL(result));
 }
 
 static InterpretResult run(void) {
@@ -112,8 +158,18 @@ static InterpretResult run(void) {
       *(vm.stackTop - 1) = NUMBER_VAL(-AS_NUMBER(*(vm.stackTop - 1)));
       break;
     case OP_ADD:
-      BINARY_OP(NUMBER_VAL, +);
-      break;
+      if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
+        double b = AS_NUMBER(pop());
+        double a = AS_NUMBER(pop());
+        push(NUMBER_VAL(a + b));
+        break;
+      }
+      if (IS_STRING(peek(0)) || IS_STRING(peek(1))) {
+        concatenate();
+        break;
+      }
+      runtimeError("Operands must be two numbers or a string and any type.");
+      return INTERPRET_RUNTIME_ERROR;
     case OP_SUBTRACT:
       BINARY_OP(NUMBER_VAL, -);
       break;
