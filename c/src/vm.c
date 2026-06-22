@@ -100,7 +100,6 @@ static void concatenate(void) {
 static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
-  // TODO: support lexicographical comparison after adding strings
 #define BINARY_OP(valueType, op)                                               \
   do {                                                                         \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
@@ -110,6 +109,21 @@ static InterpretResult run(void) {
     double b = AS_NUMBER(pop());                                               \
     double a = AS_NUMBER(pop());                                               \
     push(valueType(a op b));                                                   \
+  } while (false)
+#define COMPARISON(op)                                                         \
+  do {                                                                         \
+    if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {                            \
+      ObjString *b = AS_STRING(pop());                                         \
+      ObjString *a = AS_STRING(pop());                                         \
+      push(BOOL_VAL(strcmp(a->chars, b->chars) op 0));                         \
+    } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {                     \
+      double b = AS_NUMBER(pop());                                             \
+      double a = AS_NUMBER(pop());                                             \
+      push(BOOL_VAL(a op b));                                                  \
+    } else {                                                                   \
+      runtimeError("Operands must be two numbers or two strings.");            \
+      return INTERPRET_RUNTIME_ERROR;                                          \
+    }                                                                          \
   } while (false)
 
   for (;;) {
@@ -145,10 +159,10 @@ static InterpretResult run(void) {
       break;
     }
     case OP_GREATER:
-      BINARY_OP(BOOL_VAL, >);
+      COMPARISON(>);
       break;
     case OP_LESS:
-      BINARY_OP(BOOL_VAL, <);
+      COMPARISON(<);
       break;
     case OP_NEGATE:
       if (!IS_NUMBER(peek(0))) {
@@ -191,6 +205,7 @@ static InterpretResult run(void) {
 #undef READ_BYTE
 #undef READ_CONSTANT
 #undef BINARY_OP
+#undef COMPARISON
 }
 
 InterpretResult interpret(const char *source) {
