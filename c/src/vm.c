@@ -5,6 +5,7 @@
 #include "debug.h"
 #include "memory.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -32,10 +33,14 @@ static void runtimeError(const char *fmt, ...) {
 
 void initVM(void) {
   resetStack();
+  initTable(&vm.strings);
   vm.objects = NULL;
 }
 
-void freeVM(void) { freeObjects(); }
+void freeVM(void) {
+  freeObjects();
+  freeTable(&vm.strings);
+}
 
 void push(Value value) {
   if (vm.stackTop >= &vm.stack[STACK_MAX]) {
@@ -88,11 +93,26 @@ static void concatenate(void) {
   ObjString *a = IS_STRING(aValue) ? AS_STRING(aValue) : stringify(aValue);
 
   int length = a->length + b->length;
-  ObjString *string = makeString(length);
-  memcpy(string->chars, a->chars, a->length);
-  memcpy(string->chars + a->length, b->chars, b->length);
-  string->chars[length] = '\0';
+  char *temp = ALLOCATE(char, length + 1);
+  memcpy(temp, a->chars, a->length);
+  memcpy(temp + a->length, b->chars, b->length);
+  temp[length] = '\0';
 
+  uint32_t hash = hashString(temp, length);
+
+  ObjString *interned = tableFindString(&vm.strings, temp, length, hash);
+  if (interned != NULL) {
+    FREE_ARRAY(char, temp, length + 1);
+    push(OBJ_VAL(interned));
+    return;
+  }
+
+  ObjString *string = makeString(length, hash);
+  memcpy(string->chars, temp, length);
+  string->chars[length] = '\0';
+  FREE_ARRAY(char, temp, length + 1);
+
+  tableSet(&vm.strings, string, NIL_VAL());
   push(OBJ_VAL(string));
 }
 
