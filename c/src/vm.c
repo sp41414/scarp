@@ -112,7 +112,7 @@ static void concatenate(void) {
   string->chars[length] = '\0';
   FREE_ARRAY(char, temp, length + 1);
 
-  tableSet(&vm.strings, string, NIL_VAL());
+  tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL());
   push(OBJ_VAL(string));
 }
 
