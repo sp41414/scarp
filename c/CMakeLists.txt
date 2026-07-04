@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.3)
 project(scarp
-    VERSION 0.1
+    VERSION 0.5
     DESCRIPTION "A VM language implementation in C"
     LANGUAGES C
 )

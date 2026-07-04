@@ -1,5 +1,6 @@
 #include "chunk.h"
 #include "memory.h"
+#include <stdint.h>
 
 void initChunk(Chunk *chunk) {
   chunk->capacity = 0;
@@ -46,9 +47,9 @@ void writeChunk(Chunk *chunk, uint8_t byte, int line, int col) {
 
 void writeConstant(Chunk *chunk, Value value, int line, int col) {
   int idx = addConstant(chunk, value);
-  if (value.as.number < 256) {
+  if (idx <= UINT8_MAX) {
     writeChunk(chunk, OP_CONSTANT, line, col);
-    writeChunk(chunk, value.as.number, line, col);
+    writeChunk(chunk, (uint8_t)idx, line, col);
   } else {
     writeChunk(chunk, OP_CONSTANT_LONG, line, col);
     writeChunk(chunk, (uint8_t)(idx & 0xff), line, col);

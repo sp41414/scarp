@@ -11,5 +11,6 @@
 #define BOLD "\x1b[1m"
 #define RED_BOLD "\x1b[1;31m"
 #define RESET "\x1b[0m"
+#define BLUE "\x1b[1;34m"
 
 #endif
