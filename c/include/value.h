@@ -6,7 +6,13 @@
 typedef struct Obj Obj;
 typedef struct ObjString ObjString;
 
-typedef enum { VAL_BOOL, VAL_NIL, VAL_NUMBER, VAL_OBJ } ValueType;
+typedef enum {
+  VAL_BOOL,
+  VAL_UNDEFINED,
+  VAL_NIL,
+  VAL_NUMBER,
+  VAL_OBJ
+} ValueType;
 
 typedef struct {
   ValueType type;
@@ -19,6 +25,7 @@ typedef struct {
 
 #define IS_BOOL(value) ((value).type == VAL_BOOL)
 #define IS_NIL(value) ((value).type == VAL_NIL)
+#define IS_UNDEFINED(value) ((value).type == VAL_UNDEFINED)
 #define IS_NUMBER(value) ((value).type == VAL_NUMBER)
 #define IS_OBJ(value) ((value).type == VAL_OBJ)
 
@@ -27,7 +34,8 @@ typedef struct {
 #define AS_OBJ(value) ((value).as.obj)
 
 #define BOOL_VAL(value) ((Value){VAL_BOOL, {.boolean = value}})
-#define NIL_VAL() ((Value){VAL_NIL, {.number = 0}})
+#define NIL_VAL ((Value){VAL_NIL, {.number = 0}})
+#define UNDEFINED_VAL ((Value){VAL_UNDEFINED, {.number = -1}})
 #define NUMBER_VAL(value) ((Value){VAL_NUMBER, {.number = value}})
 #define OBJ_VAL(object) ((Value){VAL_OBJ, {.obj = (Obj *)object}})
 

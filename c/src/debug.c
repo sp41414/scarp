@@ -1,5 +1,6 @@
 #include "debug.h"
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -36,10 +37,40 @@ static int constantInstruction(const char *name, Chunk *chunk, int offset) {
 }
 
 static int longConstantInstruction(const char *name, Chunk *chunk, int offset) {
-  uint32_t constant = chunk->code[offset + 1] | (chunk->code[offset + 2] >> 8) |
-                      (chunk->code[offset + 3] >> 16);
+  uint32_t constant = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8) |
+                      (chunk->code[offset + 3] << 16);
   printf("%-16s %4d '", name, constant);
   printValue(chunk->constants.values[constant]);
+  printf("'\n");
+  return offset + 4;
+}
+
+static void printGlobalName(int slot) {
+  for (int i = 0; i < vm.globalNames.capacity; i++) {
+    Entry *entry = &vm.globalNames.entries[i];
+    if (!IS_NIL(entry->key) && IS_NUMBER(entry->value)) {
+      if ((int)AS_NUMBER(entry->value) == slot) {
+        printValue(entry->key);
+        return;
+      }
+    }
+  }
+  printf("unknown");
+}
+
+static int globalInstruction(const char *name, Chunk *chunk, int offset) {
+  uint8_t slot = chunk->code[offset + 1];
+  printf("%-16s %4d '", name, slot);
+  printGlobalName(slot);
+  printf("'\n");
+  return offset + 2;
+}
+
+static int longGlobalInstruction(const char *name, Chunk *chunk, int offset) {
+  int slot = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8) |
+             (chunk->code[offset + 3] << 16);
+  printf("%-16s %4d '", name, slot);
+  printGlobalName(slot);
   printf("'\n");
   return offset + 4;
 }
@@ -64,17 +95,17 @@ int disassembleInstruction(Chunk *chunk, int offset) {
   case OP_CONSTANT_LONG:
     return longConstantInstruction("OP_CONSTANT_LONG", chunk, offset);
   case OP_GET_GLOBAL:
-    return constantInstruction("OP_GET_GLOBAL", chunk, offset);
+    return globalInstruction("OP_GET_GLOBAL", chunk, offset);
   case OP_GET_GLOBAL_LONG:
-    return longConstantInstruction("OP_GET_GLOBAL_LONG", chunk, offset);
+    return longGlobalInstruction("OP_GET_GLOBAL_LONG", chunk, offset);
   case OP_DEFINE_GLOBAL:
-    return constantInstruction("OP_DEFINE_GLOBAL", chunk, offset);
+    return globalInstruction("OP_DEFINE_GLOBAL", chunk, offset);
   case OP_DEFINE_GLOBAL_LONG:
-    return longConstantInstruction("OP_DEFINE_GLOBAL_LONG", chunk, offset);
+    return longGlobalInstruction("OP_DEFINE_GLOBAL_LONG", chunk, offset);
   case OP_SET_GLOBAL:
-    return constantInstruction("OP_SET_GLOBAL", chunk, offset);
+    return globalInstruction("OP_SET_GLOBAL", chunk, offset);
   case OP_SET_GLOBAL_LONG:
-    return longConstantInstruction("OP_SET_GLOBAL_LONG", chunk, offset);
+    return longGlobalInstruction("OP_SET_GLOBAL_LONG", chunk, offset);
   case OP_NIL:
     return simpleInstruction("OP_NIL", offset);
   case OP_TRUE:

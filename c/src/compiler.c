@@ -3,6 +3,7 @@
 #include "common.h"
 #include "object.h"
 #include "scanner.h"
+#include "table.h"
 #include "value.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -370,7 +371,17 @@ static void parsePrecedence(Precedence precedence) {
 }
 
 static int identifierConstant(Token *name) {
-  return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
+  Value string = OBJ_VAL(copyString(name->start, name->length));
+  Value idx;
+  if (tableGet(&vm.globalNames, string, &idx)) {
+    return (int)AS_NUMBER(idx);
+  }
+
+  int newIdx = vm.globalValues.count;
+  writeValueArray(&vm.globalValues, UNDEFINED_VAL);
+
+  tableSet(&vm.globalNames, string, NUMBER_VAL((double)newIdx));
+  return newIdx;
 }
 
 static int parseVariable(const char *message) {
@@ -380,11 +391,9 @@ static int parseVariable(const char *message) {
 
 static void defineVariable(int global) {
   if (global <= UINT8_MAX) {
-    emitBytes(OP_DEFINE_GLOBAL, global);
+    emitBytes(OP_DEFINE_GLOBAL, (uint8_t)global);
   } else {
-    emitBytes(OP_DEFINE_GLOBAL_LONG, (uint8_t)(global & 0xff));
-    emitBytes((uint8_t)((global >> 8) & 0xff),
-              (uint8_t)((global >> 16) & 0xff));
+    emitLongBytes(OP_DEFINE_GLOBAL_LONG, global);
   }
 }
 

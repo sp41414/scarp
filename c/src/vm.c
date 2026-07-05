@@ -33,14 +33,16 @@ static void runtimeError(const char *fmt, ...) {
 
 void initVM(void) {
   resetStack();
-  initTable(&vm.globals);
+  initValueArray(&vm.globalValues);
+  initTable(&vm.globalNames);
   initTable(&vm.strings);
   vm.objects = NULL;
 }
 
 void freeVM(void) {
   freeObjects();
-  freeTable(&vm.globals);
+  freeValueArray(&vm.globalValues);
+  freeTable(&vm.globalNames);
   freeTable(&vm.strings);
 }
 
@@ -114,7 +116,7 @@ static void concatenate(void) {
   string->chars[length] = '\0';
   FREE_ARRAY(char, temp, length + 1);
 
-  tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL());
+  tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL);
   push(OBJ_VAL(string));
 }
 
@@ -172,7 +174,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_NIL:
-      push(NIL_VAL());
+      push(NIL_VAL);
       break;
     case OP_TRUE:
       push(BOOL_VAL(true));
@@ -184,53 +186,53 @@ static InterpretResult run(void) {
       pop();
       break;
     case OP_GET_GLOBAL: {
-      Value key = READ_CONSTANT();
-      Value value;
-      if (!tableGet(&vm.globals, key, &value)) {
-        runtimeError("Undefined variable '%s'", AS_STRING(key)->chars);
+      Value value = vm.globalValues.values[READ_BYTE()];
+      if (IS_UNDEFINED(value)) {
+        runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
       push(value);
       break;
     }
     case OP_GET_GLOBAL_LONG: {
-      Value key = READ_CONSTANT_LONG();
-      Value value;
-      if (!tableGet(&vm.globals, key, &value)) {
-        runtimeError("Undefined variable '%s'", AS_STRING(key)->chars);
+      vm.ip += 3;
+      Value value =
+          vm.globalValues
+              .values[vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)];
+      if (IS_UNDEFINED(value)) {
+        runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
       push(value);
       break;
     }
     case OP_DEFINE_GLOBAL: {
-      Value name = READ_CONSTANT();
-      tableSet(&vm.globals, name, peek(0));
-      pop();
+      vm.globalValues.values[READ_BYTE()] = pop();
       break;
     }
     case OP_DEFINE_GLOBAL_LONG: {
-      Value name = READ_CONSTANT_LONG();
-      tableSet(&vm.globals, name, peek(0));
-      pop();
+      vm.ip += 3;
+      vm.globalValues.values[vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)] =
+          pop();
       break;
     }
     case OP_SET_GLOBAL: {
-      Value name = READ_CONSTANT();
-      if (tableSet(&vm.globals, name, peek(0))) {
-        tableDelete(&vm.globals, name);
-        runtimeError("Undefined variable '%s'", AS_STRING(name)->chars);
+      uint8_t idx = READ_BYTE();
+      if (IS_UNDEFINED(vm.globalValues.values[idx])) {
+        runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
+      vm.globalValues.values[idx] = peek(0);
       break;
     }
     case OP_SET_GLOBAL_LONG: {
-      Value name = READ_CONSTANT_LONG();
-      if (tableSet(&vm.globals, name, peek(0))) {
-        tableDelete(&vm.globals, name);
-        runtimeError("Undefined variable '%s'", AS_STRING(name)->chars);
+      vm.ip += 3;
+      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      if (IS_UNDEFINED(vm.globalValues.values[idx])) {
+        runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
+      vm.globalValues.values[idx] = peek(0);
       break;
     }
     case OP_NOT:
