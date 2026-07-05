@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "chunk.h"
 #include "common.h"
+#include "memory.h"
 #include "object.h"
 #include "scanner.h"
 #include "table.h"
@@ -8,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef DEBUG_PRINT_CODE
 #include "debug.h"
 #endif
@@ -47,7 +49,20 @@ typedef struct {
   Precedence precedence;
 } ParseRule;
 
+typedef struct {
+  Token name;
+  int depth;
+} Local;
+
+typedef struct {
+  Local *locals;
+  int localCount;
+  int localCapacity;
+  int scopeDepth;
+} Compiler;
+
 Parser parser;
+Compiler *current;
 Chunk *compilingChunk;
 
 static bool match(TokenType type);
@@ -57,6 +72,14 @@ static void statement(void);
 static void declaration(void);
 static ParseRule *getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
+
+static void initCompiler(Compiler *compiler) {
+  compiler->locals = NULL;
+  compiler->localCapacity = 0;
+  compiler->localCount = 0;
+  compiler->scopeDepth = 0;
+  current = compiler;
+}
 
 static Chunk *currentChunk(void) { return compilingChunk; }
 
@@ -165,11 +188,30 @@ static void emitConstant(Value value) {
 
 static void endCompiler(void) {
   emitReturn();
+  FREE_ARRAY(Local, current->locals, current->localCapacity);
 #ifdef DEBUG_PRINT_CODE
   if (!parser.hadError) {
     disassembleChunk(currentChunk(), "code");
   }
 #endif
+}
+
+static void beginScope(void) { current->scopeDepth++; }
+
+static void endScope(void) {
+  current->scopeDepth--;
+  int n = 0;
+  while (current->localCount > 0 &&
+         current->locals[current->localCount - 1].depth > current->scopeDepth) {
+    n++;
+    current->localCount--;
+  }
+
+  while (n > 0) {
+    uint8_t toPop = n > 255 ? 255 : n;
+    emitBytes(OP_POPN, toPop);
+    n -= toPop;
+  }
 }
 
 static void number(bool canAssign) {
@@ -264,20 +306,64 @@ static void string(bool canAssign) {
       copyString(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
+static bool identifiersEqual(Token *id1, Token *id2) {
+  if (id1->length != id2->length)
+    return false;
+
+  return memcmp(id1->start, id2->start, id1->length) == 0;
+}
+
+static int resolveLocal(Compiler *compiler, Token *name) {
+  for (int i = compiler->localCount - 1; i >= 0; --i) {
+    Local *local = &compiler->locals[i];
+    if (identifiersEqual(name, &local->name)) {
+      if (local->depth == -1) {
+        error("Can't read local variable in its own initializer");
+      }
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 static void namedVariable(Token name, bool canAssign) {
-  int arg = identifierConstant(&name);
+  uint8_t getOp, setOp;
+
+  int arg = resolveLocal(current, &name);
+  if (arg != -1) {
+    if (arg <= UINT8_MAX) {
+      getOp = OP_GET_LOCAL;
+      setOp = OP_SET_LOCAL;
+    } else {
+      getOp = OP_GET_LOCAL_LONG;
+      setOp = OP_SET_LOCAL_LONG;
+    }
+  } else {
+    arg = identifierConstant(&name);
+    if (arg <= UINT8_MAX) {
+      getOp = OP_GET_GLOBAL;
+      setOp = OP_SET_GLOBAL;
+    } else {
+      getOp = OP_GET_GLOBAL_LONG;
+      setOp = OP_SET_GLOBAL_LONG;
+    }
+  }
+
   if (canAssign && match(TOKEN_EQUAL)) {
     expression();
     if (arg <= UINT8_MAX) {
-      emitBytes(OP_SET_GLOBAL, arg);
+      emitBytes(setOp, arg);
     } else {
-      emitLongBytes(OP_SET_GLOBAL_LONG, arg);
+      emitByte(setOp);
+      emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
     }
   } else {
     if (arg <= UINT8_MAX) {
-      emitBytes(OP_GET_GLOBAL, arg);
+      emitBytes(getOp, arg);
     } else {
-      emitLongBytes(OP_GET_GLOBAL_LONG, arg);
+      emitByte(getOp);
+      emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
     }
   }
 }
@@ -384,12 +470,68 @@ static int identifierConstant(Token *name) {
   return newIdx;
 }
 
+static void addLocal(Token token) {
+  if (current->localCount >= UINT16_MAX) {
+    error("Too many local variables in function");
+    return;
+  }
+
+  if (current->localCapacity < current->localCount + 1) {
+    int oldCapacity = current->localCapacity;
+    current->localCapacity = GROW_CAPACITY(oldCapacity);
+
+    if (current->localCapacity > UINT16_MAX)
+      current->localCapacity = UINT16_MAX;
+
+    current->locals =
+        GROW_ARRAY(Local, current->locals, oldCapacity, current->localCapacity);
+  }
+
+  Local *local = &current->locals[current->localCount++];
+  local->name = token;
+  local->depth = -1;
+}
+
+static void declareVariable(void) {
+  if (current->scopeDepth == 0)
+    return;
+
+  Token *name = &parser.previous;
+
+  for (int i = current->localCount - 1; i >= 0; --i) {
+    Local *local = &current->locals[i];
+    if (local->depth != -1 && local->depth < current->scopeDepth) {
+      break;
+    }
+
+    if (identifiersEqual(name, &local->name)) {
+      error("Already a variable with this name in this scope.");
+    }
+  }
+
+  addLocal(*name);
+}
+
 static int parseVariable(const char *message) {
   consume(TOKEN_IDENTIFIER, message);
+
+  declareVariable();
+  if (current->scopeDepth > 0)
+    return 0;
+
   return identifierConstant(&parser.previous);
 }
 
+static void markInitialized(void) {
+  current->locals[current->localCount - 1].depth = current->scopeDepth;
+}
+
 static void defineVariable(int global) {
+  if (current->scopeDepth > 0) {
+    markInitialized();
+    return;
+  }
+
   if (global <= UINT8_MAX) {
     emitBytes(OP_DEFINE_GLOBAL, (uint8_t)global);
   } else {
@@ -451,9 +593,21 @@ static void varDeclaration(void) {
   defineVariable(global);
 }
 
+static void block(void) {
+  while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    declaration();
+  }
+
+  consume(TOKEN_RIGHT_BRACE, "Expect '}' after block");
+}
+
 static void statement(void) {
   if (match(TOKEN_PRINT)) {
     printStatement();
+  } else if (match(TOKEN_LEFT_BRACE)) {
+    beginScope();
+    block();
+    endScope();
   } else {
     expressionStatement();
   }
@@ -471,6 +625,8 @@ static void declaration(void) {
 
 bool compile(const char *source, Chunk *chunk) {
   initScanner(source);
+  Compiler compiler;
+  initCompiler(&compiler);
   compilingChunk = chunk;
 
   parser.source = source;

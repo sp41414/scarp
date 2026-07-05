@@ -32,6 +32,8 @@ static void runtimeError(const char *fmt, ...) {
 }
 
 void initVM(void) {
+  vm.stackCapacity = 256;
+  vm.stack = malloc(vm.stackCapacity * sizeof(Value));
   resetStack();
   initValueArray(&vm.globalValues);
   initTable(&vm.globalNames);
@@ -44,13 +46,29 @@ void freeVM(void) {
   freeValueArray(&vm.globalValues);
   freeTable(&vm.globalNames);
   freeTable(&vm.strings);
+  free(vm.stack);
+  vm.stack = NULL;
+  vm.stackTop = NULL;
+  vm.stackCapacity = 0;
 }
 
 void push(Value value) {
-  if (vm.stackTop >= &vm.stack[STACK_MAX]) {
-    fprintf(stderr, "Stack overflow\n");
-    exit(1);
+  if (vm.stackTop - vm.stack >= vm.stackCapacity) {
+    if (vm.stackCapacity >= STACK_MAX) {
+      fprintf(stderr, "Stack overflow\n");
+      exit(1);
+    }
+
+    int oldCapacity = vm.stackCapacity;
+    vm.stackCapacity = GROW_CAPACITY(vm.stackCapacity);
+    if (vm.stackCapacity > STACK_MAX)
+      vm.stackCapacity = STACK_MAX;
+    ptrdiff_t offset = vm.stackTop - vm.stack;
+
+    vm.stack = GROW_ARRAY(Value, vm.stack, oldCapacity, vm.stackCapacity);
+    vm.stackTop = vm.stack + offset;
   }
+
   *vm.stackTop = value;
   vm.stackTop++;
 }
@@ -185,6 +203,20 @@ static InterpretResult run(void) {
     case OP_POP:
       pop();
       break;
+    case OP_POPN:
+      vm.stackTop -= READ_BYTE();
+      break;
+    case OP_GET_LOCAL: {
+      uint8_t slot = READ_BYTE();
+      push(vm.stack[slot]);
+      break;
+    }
+    case OP_GET_LOCAL_LONG: {
+      vm.ip += 2;
+      uint16_t slot = vm.ip[-2] | (vm.ip[-1] << 8);
+      push(vm.stack[slot]);
+      break;
+    }
     case OP_GET_GLOBAL: {
       Value value = vm.globalValues.values[READ_BYTE()];
       if (IS_UNDEFINED(value)) {
@@ -214,6 +246,17 @@ static InterpretResult run(void) {
       vm.ip += 3;
       vm.globalValues.values[vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)] =
           pop();
+      break;
+    }
+    case OP_SET_LOCAL: {
+      uint8_t slot = READ_BYTE();
+      vm.stack[slot] = peek(0);
+      break;
+    }
+    case OP_SET_LOCAL_LONG: {
+      vm.ip += 2;
+      uint16_t slot = vm.ip[-2] | (vm.ip[-1] << 8);
+      vm.stack[slot] = peek(0);
       break;
     }
     case OP_SET_GLOBAL: {

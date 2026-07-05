@@ -2,6 +2,7 @@
 #include "chunk.h"
 #include "table.h"
 #include "value.h"
+#include "vm.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -75,6 +76,18 @@ static int longGlobalInstruction(const char *name, Chunk *chunk, int offset) {
   return offset + 4;
 }
 
+static int byteInstruction(const char *name, Chunk *chunk, int offset) {
+  uint8_t slot = chunk->code[offset + 1];
+  printf("%-16s %4d\n", name, slot);
+  return offset + 2;
+}
+
+static int longByteInstruction(const char *name, Chunk *chunk, int offset) {
+  uint16_t slot = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8);
+  printf("%-16s %4d\n", name, slot);
+  return offset + 3;
+}
+
 int disassembleInstruction(Chunk *chunk, int offset) {
   printf("%04d ", offset);
 
@@ -114,6 +127,16 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return simpleInstruction("OP_FALSE", offset);
   case OP_POP:
     return simpleInstruction("OP_POP", offset);
+  case OP_POPN:
+    return byteInstruction("OP_POPN", chunk, offset);
+  case OP_GET_LOCAL:
+    return byteInstruction("OP_GET_LOCAL", chunk, offset);
+  case OP_GET_LOCAL_LONG:
+    return longByteInstruction("OP_GET_LOCAL_LONG", chunk, offset);
+  case OP_SET_LOCAL:
+    return byteInstruction("OP_SET_LOCAL", chunk, offset);
+  case OP_SET_LOCAL_LONG:
+    return longByteInstruction("OP_SET_LOCAL_LONG", chunk, offset);
   case OP_EQUAL:
     return simpleInstruction("OP_EQUAL", offset);
   case OP_GREATER:

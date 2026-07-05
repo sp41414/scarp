@@ -2,16 +2,18 @@
 #define VM_H
 
 #include "chunk.h"
+#include "common.h"
 #include "table.h"
 #include "value.h"
 
-#define STACK_MAX 256
+#define STACK_MAX UINT16_MAX
 
 typedef struct {
   Chunk *chunk;
   uint8_t *ip;
-  Value stack[STACK_MAX];
+  Value *stack;
   Value *stackTop;
+  int stackCapacity;
   Table globalNames;
   ValueArray globalValues;
   Table strings;
