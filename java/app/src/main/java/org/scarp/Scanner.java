@@ -36,6 +36,7 @@ class Scanner {
         keywords.put("self", SELF);
         keywords.put("true", TRUE);
         keywords.put("let", LET);
+        keywords.put("const", CONST);
         keywords.put("while", WHILE);
         keywords.put("break", BREAK);
     }

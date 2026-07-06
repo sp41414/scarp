@@ -33,7 +33,9 @@ public class Parser {
     private Stmt declaration() {
         try {
             if (match(LET))
-                return varDeclaration();
+                return varDeclaration(false);
+            if (match(CONST))
+                return varDeclaration(true);
             if (match(CLASS))
                 return classDeclaration();
             if (check(FUNCTION) && checkNext(IDENTIFIER)) {
@@ -47,16 +49,18 @@ public class Parser {
         }
     }
 
-    private Stmt varDeclaration() {
+    private Stmt varDeclaration(boolean isConst) {
         Token name = consume(IDENTIFIER, "Expect variable name.");
 
         Expr initializer = null;
         if (match(EQUAL)) {
             initializer = expression();
+        } else if (isConst) {
+            error(peek(), "Constant variables must be initialized at the same time they are declared");
         }
 
         consume(SEMICOLON, "Expect ; after declaration.");
-        return new Stmt.Var(name, initializer);
+        return new Stmt.Var(name, initializer, isConst);
     }
 
     private List<Token> getParams() {
@@ -203,7 +207,9 @@ public class Parser {
         if (match(SEMICOLON))
             initializer = null;
         else if (match(LET))
-            initializer = varDeclaration();
+            initializer = varDeclaration(false);
+        else if (match(CONST))
+            initializer = varDeclaration(true);
         else
             initializer = expressionStatement();
 

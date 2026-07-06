@@ -32,13 +32,12 @@ public class GenerateAst {
                 "Expression : Expr expression",
                 "Print      : Expr expression",
                 "Return     : Token keyword, Expr value",
-                "Var        : Token name, Expr initializer",
+                "Var        : Token name, Expr initializer, boolean isConst",
                 "Function   : int modifiers, Token name, List<Token> params, List<Stmt> body",
                 "Class      : Token name, Expr.Variable base, List<Expr.Variable> mixins, List<Stmt.Function> methods",
                 "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",
                 "While      : Expr condition, Stmt body",
-                "Break      : Token token"
-                ));
+                "Break      : Token token"));
     }
 
     private static void defineAst(String outputDir, String baseName, List<String> types) throws IOException {

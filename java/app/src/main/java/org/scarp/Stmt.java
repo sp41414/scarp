@@ -66,9 +66,10 @@ abstract class Stmt{
     final Expr value;
   }
   static class Var extends Stmt{ 
-    Var(Token name, Expr initializer) { 
+    Var(Token name, Expr initializer, boolean isConst) { 
       this.name = name;
       this.initializer = initializer;
+      this.isConst = isConst;
     }
 
     @Override
@@ -78,6 +79,7 @@ abstract class Stmt{
 
     final Token name;
     final Expr initializer;
+    final boolean isConst;
   }
   static class Function extends Stmt{ 
     Function(int modifiers, Token name, List<Token> params, List<Stmt> body) { 

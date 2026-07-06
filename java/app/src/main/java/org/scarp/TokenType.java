@@ -59,6 +59,7 @@ enum TokenType {
     WITH,
     TRUE,
     LET,
+    CONST,
     WHILE,
     BREAK,
 

@@ -6,20 +6,33 @@ import java.util.Map;
 import java.util.Stack;
 
 public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
+    private static class VariableInfo {
+        boolean isReady;
+        boolean isConst;
+
+        VariableInfo(boolean isReady, boolean isConst) {
+            this.isReady = isReady;
+            this.isConst = isConst;
+        }
+    }
+
     private final Interpreter interpreter;
-    private final Stack<Map<String, Boolean>> scopes = new Stack<>();
+    private final Stack<Map<String, VariableInfo>> scopes = new Stack<>();
     private final Map<String, Token> used = new HashMap<>();
+
     private enum FunctionType {
         NONE,
         FUNCTION,
         INITIALIZER,
         METHOD,
     }
+
     private enum ClassType {
         NONE,
         CLASS,
         SUBCLASS
     }
+
     private FunctionType currentFunction = FunctionType.NONE;
     private ClassType currentClass = ClassType.NONE;
     private boolean isInStaticMethod = false;
@@ -57,7 +70,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         if (stmt.initializer != null) {
             resolve(stmt.initializer);
         }
-        define(stmt.name);
+        define(stmt.name, stmt.isConst);
         return null;
     }
 
@@ -69,7 +82,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         }
 
         declare(stmt.name);
-        define(stmt.name);
+        define(stmt.name, false);
 
         resolveFunction(stmt, FunctionType.FUNCTION);
         return null;
@@ -81,7 +94,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         currentClass = ClassType.CLASS;
 
         declare(stmt.name);
-        define(stmt.name);
+        define(stmt.name, false);
 
         if (stmt.base != null && stmt.base.name.lexeme.equals(stmt.name.lexeme)) {
             Scarp.error(stmt.base.name, "A class can't inherit from itself.\n       Hint: get some sleep");
@@ -91,7 +104,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
             currentClass = ClassType.SUBCLASS;
             resolve(stmt.base);
             beginScope();
-            scopes.peek().put("base", true);
+            scopes.peek().put("base", new VariableInfo(true, false));
         }
 
         for (Expr.Variable mixin : stmt.mixins) {
@@ -101,22 +114,23 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         }
 
         beginScope();
-        scopes.peek().put("self", true);
+        scopes.peek().put("self", new VariableInfo(true, false));
 
         for (Stmt.Function method : stmt.methods) {
-           FunctionType declaration = FunctionType.METHOD;
-           if (method.name.lexeme.equals("init")) {
-               if ((method.modifiers & Modifiers.ALL) != 0)
-                   Scarp.error(method.name, "Initializer cannot have modifiers.");
-               declaration = FunctionType.INITIALIZER;
-           }
+            FunctionType declaration = FunctionType.METHOD;
+            if (method.name.lexeme.equals("init")) {
+                if ((method.modifiers & Modifiers.ALL) != 0)
+                    Scarp.error(method.name, "Initializer cannot have modifiers.");
+                declaration = FunctionType.INITIALIZER;
+            }
 
-           resolveFunction(method, declaration);
+            resolveFunction(method, declaration);
         }
 
         endScope();
 
-        if (stmt.base != null) endScope();
+        if (stmt.base != null)
+            endScope();
 
         currentClass = enclosingClass;
         return null;
@@ -132,7 +146,8 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     public Void visitIfStmt(Stmt.If stmt) {
         resolve(stmt.condition);
         resolve(stmt.thenBranch);
-        if (stmt.elseBranch != null) resolve(stmt.elseBranch);
+        if (stmt.elseBranch != null)
+            resolve(stmt.elseBranch);
         return null;
     }
 
@@ -217,7 +232,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitVariableExpr(Expr.Variable expr) {
-        if (!scopes.isEmpty() && scopes.peek().get(expr.name) == Boolean.FALSE) {
+        if (!scopes.isEmpty() && scopes.peek().get(expr.name.lexeme).isReady == Boolean.FALSE) {
             Scarp.error(expr.name, "Can't read local variable in its own initializer.");
         }
         // Second checks that don't get executed, but are here just in case.
@@ -235,7 +250,17 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitAssignExpr(Expr.Assign expr) {
-        if (isInGetterMethod) Scarp.error(expr.name, "Cannot mutate state inside a getter.");
+        if (isInGetterMethod)
+            Scarp.error(expr.name, "Cannot mutate state inside a getter.");
+
+        for (int i = scopes.size() - 1; i >= 0; --i) {
+            if (scopes.get(i).containsKey(expr.name.lexeme)) {
+                if (scopes.get(i).get(expr.name.lexeme).isConst)
+                    Scarp.error(expr.name, "Cannot reassign to a constant variable");
+                break;
+            }
+        }
+
         resolve(expr.value);
         resolveLocal(expr, expr.name);
         return null;
@@ -249,7 +274,8 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitSetExpr(Expr.Set expr) {
-        if (isInGetterMethod) Scarp.error(expr.name, "Cannot mutate state inside a getter.");
+        if (isInGetterMethod)
+            Scarp.error(expr.name, "Cannot mutate state inside a getter.");
         resolve(expr.object);
         resolve(expr.value);
         return null;
@@ -264,7 +290,6 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         if (currentClass == ClassType.NONE)
             Scarp.error(expr.keyword,
                     "Cannot use 'self' outside of a class.");
-
 
         resolveLocal(expr, expr.keyword);
         return null;
@@ -281,7 +306,6 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         else if (currentClass != ClassType.SUBCLASS)
             Scarp.error(expr.keyword,
                     "Can't use 'base' in a class with no base class.");
-
 
         resolveLocal(expr, expr.keyword);
         return null;
@@ -331,7 +355,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
         beginScope();
         for (Token param : function.params) {
             declare(param);
-            define(param);
+            define(param, false);
         }
         resolve(function.body);
         endScope();
@@ -346,7 +370,7 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
     private void beginScope() {
-        scopes.push(new HashMap<String, Boolean>());
+        scopes.push(new HashMap<String, VariableInfo>());
     }
 
     private void endScope() {
@@ -354,17 +378,19 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
     private void declare(Token name) {
-        if (scopes.isEmpty()) return;
-        Map<String, Boolean> scope = scopes.peek();
+        if (scopes.isEmpty())
+            return;
+        Map<String, VariableInfo> scope = scopes.peek();
         if (scope.containsKey(name.lexeme)) {
             Scarp.error(name, "Already a variable with this name in this scope.");
         }
-        scope.put(name.lexeme, false);
+        scope.put(name.lexeme, new VariableInfo(false, false));
     }
 
-    private void define(Token name) {
-        if (scopes.isEmpty()) return;
-        scopes.peek().put(name.lexeme, true);
+    private void define(Token name, boolean isConst) {
+        if (scopes.isEmpty())
+            return;
+        scopes.peek().put(name.lexeme, new VariableInfo(true, isConst));
         used.put(name.lexeme, name);
     }
 }

@@ -33,7 +33,7 @@ public class ScFunction implements ScCallable {
         Environment environment = new Environment(closure);
 
         for (int i = 0; i < declaration.params.size(); i++) {
-            environment.define(declaration.params.get(i).lexeme, args.get(i));
+            environment.define(declaration.params.get(i).lexeme, args.get(i), false);
         }
 
         ScClass enclosingClass = interpreter.currentExecutingClass;
@@ -41,19 +41,21 @@ public class ScFunction implements ScCallable {
             interpreter.currentExecutingClass = this.closureClass;
             interpreter.executeBlock(declaration.body, environment);
         } catch (Return value) {
-            if (isInitializer) return closure.getAt(0, "self");
+            if (isInitializer)
+                return closure.getAt(0, "self");
             return value.value;
         } finally {
             interpreter.currentExecutingClass = enclosingClass;
         }
 
-        if (isInitializer) return closure.getAt(0, "self");
+        if (isInitializer)
+            return closure.getAt(0, "self");
         return null;
     }
 
     ScFunction bind(ScInstance instance) {
         Environment environment = new Environment(closure);
-        environment.define("self", instance);
+        environment.define("self", instance, false);
         ScFunction bound = new ScFunction(declaration, environment, isInitializer, modifiers);
         bound.setClosureClass(this.closureClass);
         return bound;
@@ -65,7 +67,8 @@ public class ScFunction implements ScCallable {
 
     @Override
     public String toString() {
-        if (declaration.name == null) return "<fn>";
+        if (declaration.name == null)
+            return "<fn>";
         return "<fn " + declaration.name.lexeme + ">";
     }
 }
