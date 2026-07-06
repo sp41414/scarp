@@ -377,6 +377,7 @@ print 5 + 10;
 
 ### Variables
 Declare variables using the `let` keyword. Variables without an explicit initializer automatically default to nil.
+You can also declare constant variables using the `const` keyword. Constant variables are variables that cannot be reassigned.
 
 > [!NOTE]
 > If you try to reference uninitialized variables, it will throw an error. Unused local variables will also throw errors.
@@ -404,6 +405,17 @@ fn unused() {
     // error: Unused variable.
     // let unused;
 }
+
+
+const CONSTANT = "CONSTANT";
+print CONSTANT;
+
+/*
+   error: Cannot reassign to a constant variable
+   for (const i = 0; i < 5; i = i + 1) {
+   print i;
+   }
+ */
 ```
 
 ---

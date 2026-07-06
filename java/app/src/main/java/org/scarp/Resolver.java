@@ -232,8 +232,10 @@ public class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitVariableExpr(Expr.Variable expr) {
-        if (!scopes.isEmpty() && scopes.peek().get(expr.name.lexeme).isReady == Boolean.FALSE) {
-            Scarp.error(expr.name, "Can't read local variable in its own initializer.");
+        if (!scopes.isEmpty()) {
+            VariableInfo info = scopes.peek().get(expr.name.lexeme);
+            if (info != null && !info.isReady)
+                Scarp.error(expr.name, "Can't read local variable in its own initializer.");
         }
         // Second checks that don't get executed, but are here just in case.
         // First checks are in visitSelfExpr and visitBaseExpr
