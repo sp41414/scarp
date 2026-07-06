@@ -92,7 +92,7 @@ static void errorAt(Token *token, const char *message) {
 
   fprintf(stderr, "%serror%s: %s\n", RED_BOLD, RESET, message);
 
-  if (token->type == TOKEN_EOF) {
+  if (token->type == TOKEN_EOF || token->type == TOKEN_ERROR) {
     fprintf(stderr, "%s -->%s %d:%d\n\n", BLUE, RESET, token->line,
             token->column);
     parser.hadError = true;
@@ -364,16 +364,20 @@ static void namedVariable(Token name, bool canAssign) {
     expression();
     if (arg <= UINT8_MAX) {
       emitBytes(setOp, arg);
-    } else {
+    } else if (setOp == OP_SET_LOCAL_LONG) {
       emitByte(setOp);
       emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
+    } else {
+      emitLongBytes(setOp, arg);
     }
   } else {
     if (arg <= UINT8_MAX) {
       emitBytes(getOp, arg);
-    } else {
+    } else if (getOp == OP_GET_LOCAL_LONG) {
       emitByte(getOp);
       emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
+    } else {
+      emitLongBytes(getOp, arg);
     }
   }
 }
@@ -567,6 +571,7 @@ static void synchronize(void) {
     case TOKEN_CLASS:
     case TOKEN_FUNCTION:
     case TOKEN_LET:
+    case TOKEN_CONST:
     case TOKEN_FOR:
     case TOKEN_IF:
     case TOKEN_WHILE:

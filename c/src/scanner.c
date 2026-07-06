@@ -119,6 +119,8 @@ static void skipWhitespace(void) {
           advance();
       } else if (peekNext() == '*') {
         scanner.commentDepth++;
+        advance();
+        advance();
         multiLineComment();
       } else {
         return;
@@ -133,7 +135,7 @@ static void skipWhitespace(void) {
 static Token string(void) {
   while (peek() != '"' && !isAtEnd()) {
     if (peek() == '\n') {
-      scanner.line = 1;
+      scanner.line++;
       scanner.column = 0;
     }
     advance();
@@ -180,6 +182,7 @@ static TokenType identifierType(void) {
         return checkKeyword(2, 3, "ass", TOKEN_CLASS);
       }
     }
+    break;
   case 'e':
     return checkKeyword(1, 3, "lse", TOKEN_ELSE);
   case 'i':

@@ -255,13 +255,18 @@ static InterpretResult run(void) {
       break;
     }
     case OP_DEFINE_GLOBAL: {
-      vm.globalValues.values[READ_BYTE()] = pop();
+      uint8_t idx = READ_BYTE();
+      growFlagCapacity(idx + 1);
+      vm.globalIsConst[idx] = false;
+      vm.globalValues.values[idx] = pop();
       break;
     }
     case OP_DEFINE_GLOBAL_LONG: {
       vm.ip += 3;
-      vm.globalValues.values[vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)] =
-          pop();
+      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      growFlagCapacity(idx + 1);
+      vm.globalIsConst[idx] = false;
+      vm.globalValues.values[idx] = pop();
       break;
     }
     case OP_DEFINE_GLOBAL_CONST: {

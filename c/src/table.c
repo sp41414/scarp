@@ -52,7 +52,14 @@ static uint32_t hashValue(Value key) {
     if (IS_STRING(key)) {
       return AS_STRING(key)->hash;
     }
-    return (uint32_t)(uintptr_t)AS_OBJ(key);
+    // murmurhash3 finalization mix
+    uint64_t bits = (uint64_t)(uintptr_t)AS_OBJ(key);
+    bits ^= bits >> 33;
+    bits *= 0xff51afd7ed558ccd;
+    bits ^= bits >> 33;
+    bits *= 0xc4ceb9fe1a85ec53;
+    bits ^= bits >> 33;
+    return (uint32_t)bits;
   default:
     return 0;
   }
