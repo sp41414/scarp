@@ -52,6 +52,7 @@ typedef struct {
 typedef struct {
   Token name;
   int depth;
+  bool isConst;
 } Local;
 
 typedef struct {
@@ -66,6 +67,7 @@ Compiler *current;
 Chunk *compilingChunk;
 
 static bool match(TokenType type);
+static bool check(TokenType type);
 static int identifierConstant(Token *name);
 static void expression(void);
 static void statement(void);
@@ -298,7 +300,10 @@ static void binary(bool canAssign) {
 }
 
 static void ternary(bool canAssign) {
-  // TODO: ternary operator
+  // TODO: handle conditional bytecode
+  parsePrecedence(PREC_CONDITIONAL);
+  consume(TOKEN_COLON, "Expect ':' after then condition");
+  parsePrecedence(PREC_CONDITIONAL);
 }
 
 static void string(bool canAssign) {
@@ -329,6 +334,7 @@ static int resolveLocal(Compiler *compiler, Token *name) {
 
 static void namedVariable(Token name, bool canAssign) {
   uint8_t getOp, setOp;
+  bool isLocalConst = false;
 
   int arg = resolveLocal(current, &name);
   if (arg != -1) {
@@ -339,6 +345,7 @@ static void namedVariable(Token name, bool canAssign) {
       getOp = OP_GET_LOCAL_LONG;
       setOp = OP_SET_LOCAL_LONG;
     }
+    isLocalConst = current->locals[arg].isConst;
   } else {
     arg = identifierConstant(&name);
     if (arg <= UINT8_MAX) {
@@ -351,6 +358,9 @@ static void namedVariable(Token name, bool canAssign) {
   }
 
   if (canAssign && match(TOKEN_EQUAL)) {
+    if (isLocalConst) {
+      error("Cannot reassign to a constant variable");
+    }
     expression();
     if (arg <= UINT8_MAX) {
       emitBytes(setOp, arg);
@@ -470,7 +480,7 @@ static int identifierConstant(Token *name) {
   return newIdx;
 }
 
-static void addLocal(Token token) {
+static void addLocal(bool isConst, Token token) {
   if (current->localCount >= UINT16_MAX) {
     error("Too many local variables in function");
     return;
@@ -490,9 +500,10 @@ static void addLocal(Token token) {
   Local *local = &current->locals[current->localCount++];
   local->name = token;
   local->depth = -1;
+  local->isConst = isConst;
 }
 
-static void declareVariable(void) {
+static void declareVariable(bool isConst) {
   if (current->scopeDepth == 0)
     return;
 
@@ -509,13 +520,13 @@ static void declareVariable(void) {
     }
   }
 
-  addLocal(*name);
+  addLocal(isConst, *name);
 }
 
-static int parseVariable(const char *message) {
+static int parseVariable(bool isConst, const char *message) {
   consume(TOKEN_IDENTIFIER, message);
 
-  declareVariable();
+  declareVariable(isConst);
   if (current->scopeDepth > 0)
     return 0;
 
@@ -526,16 +537,18 @@ static void markInitialized(void) {
   current->locals[current->localCount - 1].depth = current->scopeDepth;
 }
 
-static void defineVariable(int global) {
+static void defineVariable(bool isConst, int global) {
   if (current->scopeDepth > 0) {
     markInitialized();
     return;
   }
 
   if (global <= UINT8_MAX) {
-    emitBytes(OP_DEFINE_GLOBAL, (uint8_t)global);
+    emitBytes(isConst ? OP_DEFINE_GLOBAL_CONST : OP_DEFINE_GLOBAL,
+              (uint8_t)global);
   } else {
-    emitLongBytes(OP_DEFINE_GLOBAL_LONG, global);
+    emitLongBytes(isConst ? OP_DEFINE_GLOBAL_CONST_LONG : OP_DEFINE_GLOBAL_LONG,
+                  global);
   }
 }
 
@@ -579,18 +592,22 @@ static void expressionStatement(void) {
   emitByte(OP_POP);
 }
 
-static void varDeclaration(void) {
-  int global = parseVariable("Expect variable name");
+static void varDeclaration(bool isConst) {
+  int global = parseVariable(isConst, "Expect variable name");
 
   if (match(TOKEN_EQUAL)) {
     expression();
+  } else if (isConst) {
+    error("Constant variables must be initialized at the same time they are "
+          "declared");
+    emitByte(OP_NIL);
   } else {
     emitByte(OP_NIL);
   }
 
   consume(TOKEN_SEMICOLON, "Expect ';' after variable declaration");
 
-  defineVariable(global);
+  defineVariable(isConst, global);
 }
 
 static void block(void) {
@@ -615,7 +632,9 @@ static void statement(void) {
 
 static void declaration(void) {
   if (match(TOKEN_LET)) {
-    varDeclaration();
+    varDeclaration(false);
+  } else if (match(TOKEN_CONST)) {
+    varDeclaration(true);
   } else {
     statement();
   }

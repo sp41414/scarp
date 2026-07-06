@@ -155,6 +155,22 @@ static inline InterpretResult comparison(uint8_t op) {
   return INTERPRET_OK;
 }
 
+static inline void growFlagCapacity(int idx) {
+  if (idx < vm.globalFlagCapacity)
+    return;
+
+  int oldCapacity = vm.globalFlagCapacity;
+  vm.globalFlagCapacity = GROW_CAPACITY(oldCapacity);
+  if (vm.globalFlagCapacity <= idx)
+    vm.globalFlagCapacity = idx + 1;
+
+  vm.globalIsConst =
+      GROW_ARRAY(bool, vm.globalIsConst, oldCapacity, vm.globalFlagCapacity);
+  for (int i = oldCapacity; i < vm.globalFlagCapacity; ++i) {
+    vm.globalIsConst[i] = false;
+  }
+}
+
 static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
@@ -248,6 +264,23 @@ static InterpretResult run(void) {
           pop();
       break;
     }
+    case OP_DEFINE_GLOBAL_CONST: {
+      uint8_t idx = READ_BYTE();
+      growFlagCapacity(idx + 1);
+
+      vm.globalValues.values[idx] = pop();
+      vm.globalIsConst[idx] = true;
+      break;
+    }
+    case OP_DEFINE_GLOBAL_CONST_LONG: {
+      vm.ip += 3;
+      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      growFlagCapacity(idx + 1);
+
+      vm.globalValues.values[idx] = pop();
+      vm.globalIsConst[idx] = true;
+      break;
+    }
     case OP_SET_LOCAL: {
       uint8_t slot = READ_BYTE();
       vm.stack[slot] = peek(0);
@@ -265,6 +298,10 @@ static InterpretResult run(void) {
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
+      if (vm.globalIsConst[idx]) {
+        runtimeError("Cannot reassign to a constant variable");
+        return INTERPRET_RUNTIME_ERROR;
+      }
       vm.globalValues.values[idx] = peek(0);
       break;
     }
@@ -273,6 +310,10 @@ static InterpretResult run(void) {
       int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
       if (IS_UNDEFINED(vm.globalValues.values[idx])) {
         runtimeError("Undefined variable");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      if (vm.globalIsConst[idx]) {
+        runtimeError("Cannot reassign to a constant variable");
         return INTERPRET_RUNTIME_ERROR;
       }
       vm.globalValues.values[idx] = peek(0);

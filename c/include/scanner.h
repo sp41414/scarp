@@ -53,6 +53,7 @@ typedef enum {
   TOKEN_SELF,
   TOKEN_TRUE,
   TOKEN_LET,
+  TOKEN_CONST,
   TOKEN_WHILE,
   // TODO:
   // TOKEN_STATIC,
