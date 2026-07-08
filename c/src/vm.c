@@ -397,6 +397,11 @@ static InterpretResult run(void) {
         vm.ip += offset;
       break;
     }
+    case OP_LOOP: {
+      uint16_t offset = READ_SHORT();
+      vm.ip -= offset;
+      break;
+    }
     case OP_ADD: {
       if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
         double b = AS_NUMBER(pop());

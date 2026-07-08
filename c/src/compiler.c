@@ -175,6 +175,15 @@ static int emitJump(uint8_t instruction) {
   return currentChunk()->count - 2;
 }
 
+static void emitLoop(int loopStart) {
+  emitByte(OP_LOOP);
+  int offset = currentChunk()->count - loopStart + 2;
+  if (offset > UINT16_MAX)
+    error("Loop body too large.");
+
+  emitBytes(offset & 0xff, (offset >> 8) & 0xff);
+}
+
 static void emitReturn(void) { emitByte(OP_RETURN); }
 
 static int makeConstant(Value value) {
@@ -679,6 +688,21 @@ static void ifStatement(void) {
   patchJump(elseJump);
 }
 
+static void whileStatement(void) {
+  int loopStart = currentChunk()->count;
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition");
+
+  int exitJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
+  statement();
+  emitLoop(loopStart);
+
+  patchJump(exitJump);
+  emitByte(OP_POP);
+}
+
 static void varDeclaration(bool isConst) {
   int global = parseVariable(isConst, "Expect variable name");
 
@@ -710,6 +734,8 @@ static void statement(void) {
     printStatement();
   } else if (match(TOKEN_IF)) {
     ifStatement();
+  } else if (match(TOKEN_WHILE)) {
+    whileStatement();
   } else if (match(TOKEN_LEFT_BRACE)) {
     beginScope();
     block();
