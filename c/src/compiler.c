@@ -36,7 +36,7 @@ typedef enum {
   PREC_SHIFT,       // >> << >>>
   PREC_TERM,        // + -
   PREC_FACTOR,      // * /
-  PREC_UNARY,       // ! -
+  PREC_UNARY,       // ! ~ -
   PREC_CALL,        // . ()
   PREC_PRIMARY
 } Precedence;
@@ -169,6 +169,12 @@ static void emitLongBytes(OpCode code, int byte) {
   emitBytes((uint8_t)((byte >> 8) & 0xff), (uint8_t)((byte >> 16) & 0xff));
 }
 
+static int emitJump(uint8_t instruction) {
+  emitByte(instruction);
+  emitBytes(0xff, 0xff);
+  return currentChunk()->count - 2;
+}
+
 static void emitReturn(void) { emitByte(OP_RETURN); }
 
 static int makeConstant(Value value) {
@@ -186,6 +192,16 @@ static void emitConstant(Value value) {
   } else {
     emitLongBytes(OP_CONSTANT_LONG, constant);
   }
+}
+
+static void patchJump(int offset) {
+  int jump = currentChunk()->count - offset - 2;
+  if (jump > UINT16_MAX) {
+    error("Too much code to jump over");
+  }
+
+  currentChunk()->code[offset] = jump & 0xff;
+  currentChunk()->code[offset + 1] = (jump >> 8) & 0xff;
 }
 
 static void endCompiler(void) {
@@ -236,6 +252,9 @@ static void unary(bool canAssign) {
     break;
   case TOKEN_MINUS:
     emitByte(OP_NEGATE);
+    break;
+  case TOKEN_TILDE:
+    emitByte(OP_BIN_NOT);
     break;
   default:
     return;
@@ -294,16 +313,41 @@ static void binary(bool canAssign) {
   case TOKEN_SLASH:
     emitByte(OP_DIVIDE);
     break;
+  case TOKEN_OR:
+    emitByte(OP_BIN_OR);
+    break;
+  case TOKEN_AND:
+    emitByte(OP_BIN_AND);
+    break;
+  case TOKEN_XOR:
+    emitByte(OP_BIN_XOR);
+    break;
+  case TOKEN_SHIFT_LEFT:
+    emitByte(OP_BIN_SHIFT_LEFT);
+    break;
+  case TOKEN_SHIFT_RIGHT:
+    emitByte(OP_BIN_SHIFT_RIGHT);
+    break;
+  case TOKEN_SHIFT_RIGHT_UNSIGNED:
+    emitByte(OP_BIN_SHIFT_RIGHT_UNSIGNED);
+    break;
   default:
     return;
   }
 }
 
 static void ternary(bool canAssign) {
-  // TODO: handle conditional bytecode
+  int thenJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
   parsePrecedence(PREC_CONDITIONAL);
+  int elseJump = emitJump(OP_JUMP);
+  patchJump(thenJump);
+
   consume(TOKEN_COLON, "Expect ':' after then condition");
+
+  emitByte(OP_POP);
   parsePrecedence(PREC_CONDITIONAL);
+  patchJump(elseJump);
 }
 
 static void string(bool canAssign) {
@@ -386,6 +430,25 @@ static void variable(bool canAssign) {
   namedVariable(parser.previous, canAssign);
 }
 
+static void and_and(bool canAssign) {
+  int endJump = emitJump(OP_JUMP_IF_FALSE);
+
+  emitByte(OP_POP);
+  parsePrecedence(PREC_AND_AND);
+
+  patchJump(endJump);
+}
+
+static void or_or(bool canAssign) {
+  int elseJump = emitJump(OP_JUMP_IF_FALSE);
+  int jump = emitJump(OP_JUMP);
+
+  patchJump(elseJump);
+  emitByte(OP_POP);
+  parsePrecedence(PREC_OR_OR);
+  patchJump(jump);
+}
+
 ParseRule rules[] = {
     [TOKEN_LEFT_PAREN] = {grouping, NULL, PREC_NONE},
     [TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
@@ -408,15 +471,15 @@ ParseRule rules[] = {
     [TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
-    [TOKEN_AND_AND] = {NULL, NULL, PREC_NONE},
-    [TOKEN_OR_OR] = {NULL, NULL, PREC_NONE},
-    [TOKEN_AND] = {NULL, NULL, PREC_NONE},
-    [TOKEN_OR] = {NULL, NULL, PREC_NONE},
-    [TOKEN_XOR] = {NULL, NULL, PREC_NONE},
-    [TOKEN_TILDE] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SHIFT_RIGHT] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SHIFT_LEFT] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SHIFT_RIGHT_UNSIGNED] = {NULL, NULL, PREC_NONE},
+    [TOKEN_AND_AND] = {NULL, and_and, PREC_AND_AND},
+    [TOKEN_OR_OR] = {NULL, or_or, PREC_OR_OR},
+    [TOKEN_AND] = {NULL, binary, PREC_AND},
+    [TOKEN_OR] = {NULL, binary, PREC_OR},
+    [TOKEN_XOR] = {NULL, binary, PREC_XOR},
+    [TOKEN_TILDE] = {unary, NULL, PREC_UNARY},
+    [TOKEN_SHIFT_RIGHT] = {NULL, binary, PREC_SHIFT},
+    [TOKEN_SHIFT_LEFT] = {NULL, binary, PREC_SHIFT},
+    [TOKEN_SHIFT_RIGHT_UNSIGNED] = {NULL, binary, PREC_SHIFT},
     [TOKEN_IDENTIFIER] = {variable, NULL, PREC_NONE},
     [TOKEN_STRING] = {string, NULL, PREC_NONE},
     [TOKEN_NUMBER] = {number, NULL, PREC_NONE},
@@ -597,6 +660,25 @@ static void expressionStatement(void) {
   emitByte(OP_POP);
 }
 
+static void ifStatement(void) {
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition");
+
+  int thenJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
+  statement();
+  int elseJump = emitJump(OP_JUMP);
+
+  patchJump(thenJump);
+  emitByte(OP_POP);
+
+  if (match(TOKEN_ELSE))
+    statement();
+
+  patchJump(elseJump);
+}
+
 static void varDeclaration(bool isConst) {
   int global = parseVariable(isConst, "Expect variable name");
 
@@ -626,6 +708,8 @@ static void block(void) {
 static void statement(void) {
   if (match(TOKEN_PRINT)) {
     printStatement();
+  } else if (match(TOKEN_IF)) {
+    ifStatement();
   } else if (match(TOKEN_LEFT_BRACE)) {
     beginScope();
     block();

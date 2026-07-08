@@ -11,13 +11,16 @@
 typedef struct {
   Chunk *chunk;
   uint8_t *ip;
+
   Value *stack;
   Value *stackTop;
   int stackCapacity;
+
   Table globalNames;
   ValueArray globalValues;
   bool *globalIsConst;
   int globalFlagCapacity;
+
   Table strings;
   Obj *objects;
 } VM;

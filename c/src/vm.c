@@ -7,6 +7,7 @@
 #include "object.h"
 #include "table.h"
 #include "value.h"
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,8 +172,22 @@ static inline void growFlagCapacity(int idx) {
   }
 }
 
+// from ECMAScript RFC
+static int32_t toInt32(double d) {
+  if (isnan(d) || isinf(d))
+    return 0;
+  double modded = fmod(trunc(d), UINT32_MAX + 1.0);
+  if (modded < 0)
+    modded += UINT32_MAX + 1.0;
+  uint32_t u = (uint32_t)modded;
+  return (int32_t)u;
+}
+
 static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
+#define READ_SHORT() (vm.ip += 2, (uint16_t)(vm.ip[-2] | (vm.ip[-1] << 8)))
+#define READ_LONG()                                                            \
+  (vm.ip += 3, (int)(vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)))
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define READ_CONSTANT_LONG()                                                   \
   (vm.ip += 3, vm.chunk->constants                                             \
@@ -185,6 +200,17 @@ static InterpretResult run(void) {
     }                                                                          \
     double b = AS_NUMBER(peek(0));                                             \
     double a = AS_NUMBER(peek(1));                                             \
+    vm.stackTop -= 2;                                                          \
+    push(valueType(a op b));                                                   \
+  } while (false)
+#define BINARY_BITWISE_OP(valueType, op)                                       \
+  do {                                                                         \
+    if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
+      runtimeError("Operands must be numbers.");                               \
+      return INTERPRET_RUNTIME_ERROR;                                          \
+    }                                                                          \
+    int32_t b = toInt32(AS_NUMBER(peek(0)));                                   \
+    int32_t a = toInt32(AS_NUMBER(peek(1)));                                   \
     vm.stackTop -= 2;                                                          \
     push(valueType(a op b));                                                   \
   } while (false)
@@ -207,29 +233,33 @@ static InterpretResult run(void) {
       push(constant);
       break;
     }
-    case OP_NIL:
+    case OP_NIL: {
       push(NIL_VAL);
       break;
-    case OP_TRUE:
+    }
+    case OP_TRUE: {
       push(BOOL_VAL(true));
       break;
-    case OP_FALSE:
+    }
+    case OP_FALSE: {
       push(BOOL_VAL(false));
       break;
-    case OP_POP:
+    }
+    case OP_POP: {
       pop();
       break;
-    case OP_POPN:
+    }
+    case OP_POPN: {
       vm.stackTop -= READ_BYTE();
       break;
+    }
     case OP_GET_LOCAL: {
       uint8_t slot = READ_BYTE();
       push(vm.stack[slot]);
       break;
     }
     case OP_GET_LOCAL_LONG: {
-      vm.ip += 2;
-      uint16_t slot = vm.ip[-2] | (vm.ip[-1] << 8);
+      uint16_t slot = READ_SHORT();
       push(vm.stack[slot]);
       break;
     }
@@ -243,10 +273,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_GET_GLOBAL_LONG: {
-      vm.ip += 3;
-      Value value =
-          vm.globalValues
-              .values[vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)];
+      Value value = vm.globalValues.values[READ_LONG()];
       if (IS_UNDEFINED(value)) {
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
@@ -262,8 +289,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_DEFINE_GLOBAL_LONG: {
-      vm.ip += 3;
-      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      int idx = READ_LONG();
       growFlagCapacity(idx + 1);
       vm.globalIsConst[idx] = false;
       vm.globalValues.values[idx] = pop();
@@ -278,8 +304,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_DEFINE_GLOBAL_CONST_LONG: {
-      vm.ip += 3;
-      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      int idx = READ_LONG();
       growFlagCapacity(idx + 1);
 
       vm.globalValues.values[idx] = pop();
@@ -292,8 +317,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_SET_LOCAL_LONG: {
-      vm.ip += 2;
-      uint16_t slot = vm.ip[-2] | (vm.ip[-1] << 8);
+      uint16_t slot = READ_SHORT();
       vm.stack[slot] = peek(0);
       break;
     }
@@ -311,8 +335,7 @@ static InterpretResult run(void) {
       break;
     }
     case OP_SET_GLOBAL_LONG: {
-      vm.ip += 3;
-      int idx = vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16);
+      int idx = READ_LONG();
       if (IS_UNDEFINED(vm.globalValues.values[idx])) {
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
@@ -324,9 +347,10 @@ static InterpretResult run(void) {
       vm.globalValues.values[idx] = peek(0);
       break;
     }
-    case OP_NOT:
+    case OP_NOT: {
       push(BOOL_VAL(isFalsey(pop())));
       break;
+    }
     case OP_EQUAL: {
       Value b = pop();
       Value a = pop();
@@ -334,23 +358,46 @@ static InterpretResult run(void) {
       break;
     }
     case OP_GREATER:
-    case OP_LESS:
+    case OP_LESS: {
       if (comparison(instruction) == INTERPRET_RUNTIME_ERROR) {
         return INTERPRET_RUNTIME_ERROR;
       }
       break;
-    case OP_NEGATE:
+    }
+    case OP_NEGATE: {
       if (!IS_NUMBER(peek(0))) {
         runtimeError("Operand must be a number.");
         return INTERPRET_RUNTIME_ERROR;
       }
       *(vm.stackTop - 1) = NUMBER_VAL(-AS_NUMBER(*(vm.stackTop - 1)));
       break;
-    case OP_PRINT:
+    }
+    case OP_BIN_NOT: {
+      if (!IS_NUMBER(peek(0))) {
+        runtimeError("Operand must be a number.");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      int32_t operand = toInt32(AS_NUMBER(pop()));
+      push(NUMBER_VAL(~operand));
+      break;
+    }
+    case OP_PRINT: {
       printValue(pop());
       printf("\n");
       break;
-    case OP_ADD:
+    }
+    case OP_JUMP: {
+      uint16_t offset = READ_SHORT();
+      vm.ip += offset;
+      break;
+    }
+    case OP_JUMP_IF_FALSE: {
+      uint16_t offset = READ_SHORT();
+      if (isFalsey(peek(0)))
+        vm.ip += offset;
+      break;
+    }
+    case OP_ADD: {
       if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
         double b = AS_NUMBER(pop());
         double a = AS_NUMBER(pop());
@@ -363,15 +410,51 @@ static InterpretResult run(void) {
       }
       runtimeError("Operands must be two numbers or a string and any type.");
       return INTERPRET_RUNTIME_ERROR;
-    case OP_SUBTRACT:
+    }
+    case OP_SUBTRACT: {
       BINARY_OP(NUMBER_VAL, -);
       break;
-    case OP_DIVIDE:
+    }
+    case OP_DIVIDE: {
       BINARY_OP(NUMBER_VAL, /);
       break;
-    case OP_MULTIPLY:
+    }
+    case OP_MULTIPLY: {
       BINARY_OP(NUMBER_VAL, *);
       break;
+    }
+    case OP_BIN_AND: {
+      BINARY_BITWISE_OP(NUMBER_VAL, &);
+      break;
+    }
+    case OP_BIN_OR: {
+      BINARY_BITWISE_OP(NUMBER_VAL, |);
+      break;
+    }
+    case OP_BIN_XOR: {
+      BINARY_BITWISE_OP(NUMBER_VAL, ^);
+      break;
+    }
+    case OP_BIN_SHIFT_LEFT: {
+      BINARY_BITWISE_OP(NUMBER_VAL, <<);
+      break;
+    }
+    case OP_BIN_SHIFT_RIGHT: {
+      BINARY_BITWISE_OP(NUMBER_VAL, >>);
+      break;
+    }
+    case OP_BIN_SHIFT_RIGHT_UNSIGNED: {
+      if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {
+        runtimeError("Operands must be numbers.");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      // doesnt use the macro due to int32_t and uint32_t differences
+      uint32_t b = (uint32_t)toInt32(AS_NUMBER(peek(0))) & 0x1fu;
+      uint32_t a = (uint32_t)toInt32(AS_NUMBER(peek(1)));
+      vm.stackTop -= 2;
+      push(NUMBER_VAL((double)(a >> b)));
+      break;
+    }
     case OP_RETURN: {
       return INTERPRET_OK;
     }
@@ -379,9 +462,12 @@ static InterpretResult run(void) {
   }
 
 #undef READ_BYTE
+#undef READ_SHORT
+#undef READ_LONG
 #undef READ_CONSTANT
 #undef READ_CONSTANT_LONG
 #undef BINARY_OP
+#undef BINARY_BITWISE_OP
 }
 
 InterpretResult interpret(const char *source) {

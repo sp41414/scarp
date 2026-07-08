@@ -88,6 +88,13 @@ static int longByteInstruction(const char *name, Chunk *chunk, int offset) {
   return offset + 3;
 }
 
+static int jumpInstruction(const char *name, int sign, Chunk *chunk,
+                           int offset) {
+  uint16_t jump = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8);
+  printf("%-16s %4d -> %4d\n", name, offset, offset + 3 + sign * jump);
+  return offset + 3;
+}
+
 int disassembleInstruction(Chunk *chunk, int offset) {
   printf("%04d ", offset);
 
@@ -151,6 +158,10 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return simpleInstruction("OP_NEGATE", offset);
   case OP_PRINT:
     return simpleInstruction("OP_PRINT", offset);
+  case OP_JUMP:
+    return jumpInstruction("OP_JUMP", 1, chunk, offset);
+  case OP_JUMP_IF_FALSE:
+    return jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset);
   case OP_NOT:
     return simpleInstruction("OP_NOT", offset);
   case OP_ADD:
@@ -161,6 +172,20 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return simpleInstruction("OP_MULTIPLY", offset);
   case OP_DIVIDE:
     return simpleInstruction("OP_DIVIDE", offset);
+  case OP_BIN_AND:
+    return simpleInstruction("OP_BIN_AND", offset);
+  case OP_BIN_OR:
+    return simpleInstruction("OP_BIN_OR", offset);
+  case OP_BIN_XOR:
+    return simpleInstruction("OP_BIN_XOR", offset);
+  case OP_BIN_NOT:
+    return simpleInstruction("OP_BIN_NOT", offset);
+  case OP_BIN_SHIFT_RIGHT:
+    return simpleInstruction("OP_BIN_SHIFT_RIGHT", offset);
+  case OP_BIN_SHIFT_RIGHT_UNSIGNED:
+    return simpleInstruction("OP_BIN_SHIFT_RIGHT_UNSIGNED", offset);
+  case OP_BIN_SHIFT_LEFT:
+    return simpleInstruction("OP_BIN_SHIFT_LEFT", offset);
   default:
     printf("Unknown opcode %d\n", instruction);
     return offset + 1;

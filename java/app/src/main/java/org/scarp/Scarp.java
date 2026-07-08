@@ -87,7 +87,7 @@ public class Scarp {
     /**
      * Reports an error in format:
      * error: message
-     * --> file:line:col
+     * --> line:col
      * |
      * l | token lexeme
      * ^^^^^
