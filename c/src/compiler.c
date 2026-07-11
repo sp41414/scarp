@@ -15,6 +15,7 @@
 #endif
 
 #define MAX_CASES 256
+#define MAX_BREAKS 64
 
 typedef struct {
   Token current;
@@ -63,6 +64,8 @@ typedef struct Loop {
   struct Loop *enclosing;
   int scopeDepth;
   int jumpAddress;
+  int breakJumps[MAX_BREAKS];
+  int breakCount;
 } Loop;
 
 typedef struct {
@@ -689,6 +692,7 @@ static inline void beginLoop(Loop *loop, int loopStart) {
   loop->enclosing = current->currentLoop;
   loop->scopeDepth = current->scopeDepth;
   loop->jumpAddress = loopStart;
+  loop->breakCount = 0;
 
   current->currentLoop = loop;
 }
@@ -742,6 +746,9 @@ static void forStatement(void) {
     emitByte(OP_POP);
   }
   endScope();
+  for (int i = 0; i < loop.breakCount; ++i) {
+    patchJump(loop.breakJumps[i]);
+  }
   endLoop();
 }
 
@@ -848,6 +855,9 @@ static void whileStatement(void) {
   patchJump(exitJump);
   emitByte(OP_POP);
 
+  for (int i = 0; i < loop.breakCount; ++i) {
+    patchJump(loop.breakJumps[i]);
+  }
   endLoop();
 }
 
@@ -877,7 +887,16 @@ static void continueStatement(void) {
 }
 
 static void breakStatement(void) {
-  // TODO: break statement
+  if (current->currentLoop == NULL)
+    error("Cannot use 'break' outside of a loop");
+  consume(TOKEN_SEMICOLON, "Expect ';' after 'break'");
+  if (current->currentLoop->breakCount + 1 > MAX_BREAKS) {
+    error("Too many break statements in a loop");
+  }
+
+  emitLoopPops();
+  current->currentLoop->breakJumps[current->currentLoop->breakCount++] =
+      emitJump(OP_JUMP);
 }
 
 static void varDeclaration(bool isConst) {
