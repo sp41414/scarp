@@ -14,6 +14,8 @@
 #include "debug.h"
 #endif
 
+#define MAX_CASES 256
+
 typedef struct {
   Token current;
   Token previous;
@@ -735,72 +737,71 @@ static void ifStatement(void) {
   patchJump(elseJump);
 }
 
+static void closeCase(int *exitJumps, int *exitCount, int previousCaseSkip) {
+  if (*exitCount < MAX_CASES) {
+    exitJumps[(*exitCount)++] = emitJump(OP_JUMP);
+  } else {
+    error("Too many cases in switch");
+  }
+  patchJump(previousCaseSkip);
+  emitByte(OP_POP);
+}
+
 static void switchStatement(void) {
   consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'");
   expression();
   consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression");
 
-  beginScope();
   consume(TOKEN_LEFT_BRACE, "Expect '{'");
+  beginScope();
 
-  int exitJumps[256];
+  int exitJumps[MAX_CASES];
   int exitCount = 0;
   int previousCaseSkip = -1;
   SwitchState state = SWITCH_NONE;
   while (!match(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
-    if (check(TOKEN_CASE) || check(TOKEN_DEFAULT)) {
+    if (match(TOKEN_CASE) || match(TOKEN_DEFAULT)) {
+      TokenType caseType = parser.previous.type;
+
+      if (state == SWITCH_DEFAULT) {
+        error("Cannot have another 'case' or 'default' after the default case");
+      }
+
       if (state == SWITCH_CASE) {
-        if (exitCount < 256) {
-          exitJumps[exitCount++] = emitJump(OP_JUMP);
-        } else {
-          error("Number of cases in switch exceeds the maximum 256");
-        }
+        closeCase(exitJumps, &exitCount, previousCaseSkip);
+      }
 
-        patchJump(previousCaseSkip);
+      if (caseType == TOKEN_CASE) {
+        state = SWITCH_CASE;
+        emitByte(OP_DUP);
+        expression();
+        consume(TOKEN_COLON, "Expect ':' after case expression");
+
+        emitByte(OP_EQUAL);
+        previousCaseSkip = emitJump(OP_JUMP_IF_FALSE);
+
         emitByte(OP_POP);
+      } else {
+        state = SWITCH_DEFAULT;
+        consume(TOKEN_COLON, "Expect ':' after 'default'");
+        previousCaseSkip = -1;
       }
-    }
-
-    if (match(TOKEN_CASE)) {
-      if (state == SWITCH_DEFAULT) {
-        error("Cannot have another 'case' after a 'default'");
+    } else {
+      if (state == SWITCH_NONE) {
+        error("Cannot have any statements before 'case' or 'default'");
       }
-      state = SWITCH_CASE;
-      emitByte(OP_DUP);
-      expression();
-      consume(TOKEN_COLON, "Expect ':' after case expression");
-
-      emitByte(OP_EQUAL);
-      previousCaseSkip = emitJump(OP_JUMP_IF_FALSE);
-
-      emitByte(OP_POP);
-      continue;
+      statement();
     }
-    if (match(TOKEN_DEFAULT)) {
-      if (state == SWITCH_DEFAULT) {
-        error("Cannot have another 'default' after a 'default'");
-      }
-      state = SWITCH_DEFAULT;
-      consume(TOKEN_COLON, "Expect ':' after 'default'");
-      previousCaseSkip = -1;
-      continue;
-    }
-
-    if (state == SWITCH_NONE) {
-      error("Cannot have any statements before 'case' or 'default'");
-    }
-    statement();
   }
+  endScope();
 
-  if (state == SWITCH_CASE && previousCaseSkip != -1) {
-    patchJump(previousCaseSkip);
-    emitByte(OP_POP);
+  if (state == SWITCH_CASE) {
+    closeCase(exitJumps, &exitCount, previousCaseSkip);
   }
   for (int i = 0; i < exitCount; ++i) {
     patchJump(exitJumps[i]);
   }
   emitByte(OP_POP);
-  endScope();
 }
 
 static void whileStatement(void) {
