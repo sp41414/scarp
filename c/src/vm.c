@@ -233,6 +233,10 @@ static InterpretResult run(void) {
       push(constant);
       break;
     }
+    case OP_DUP: {
+      push(peek(0));
+      break;
+    }
     case OP_NIL: {
       push(NIL_VAL);
       break;

@@ -22,6 +22,8 @@ typedef struct {
   bool panicMode;
 } Parser;
 
+typedef enum { SWITCH_NONE, SWITCH_CASE, SWITCH_DEFAULT } SwitchState;
+
 typedef enum {
   PREC_NONE,
   PREC_ASSIGNMENT,  // =
@@ -733,6 +735,74 @@ static void ifStatement(void) {
   patchJump(elseJump);
 }
 
+static void switchStatement(void) {
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression");
+
+  beginScope();
+  consume(TOKEN_LEFT_BRACE, "Expect '{'");
+
+  int exitJumps[256];
+  int exitCount = 0;
+  int previousCaseSkip = -1;
+  SwitchState state = SWITCH_NONE;
+  while (!match(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    if (check(TOKEN_CASE) || check(TOKEN_DEFAULT)) {
+      if (state == SWITCH_CASE) {
+        if (exitCount < 256) {
+          exitJumps[exitCount++] = emitJump(OP_JUMP);
+        } else {
+          error("Number of cases in switch exceeds the maximum 256");
+        }
+
+        patchJump(previousCaseSkip);
+        emitByte(OP_POP);
+      }
+    }
+
+    if (match(TOKEN_CASE)) {
+      if (state == SWITCH_DEFAULT) {
+        error("Cannot have another 'case' after a 'default'");
+      }
+      state = SWITCH_CASE;
+      emitByte(OP_DUP);
+      expression();
+      consume(TOKEN_COLON, "Expect ':' after case expression");
+
+      emitByte(OP_EQUAL);
+      previousCaseSkip = emitJump(OP_JUMP_IF_FALSE);
+
+      emitByte(OP_POP);
+      continue;
+    }
+    if (match(TOKEN_DEFAULT)) {
+      if (state == SWITCH_DEFAULT) {
+        error("Cannot have another 'default' after a 'default'");
+      }
+      state = SWITCH_DEFAULT;
+      consume(TOKEN_COLON, "Expect ':' after 'default'");
+      previousCaseSkip = -1;
+      continue;
+    }
+
+    if (state == SWITCH_NONE) {
+      error("Cannot have any statements before 'case' or 'default'");
+    }
+    statement();
+  }
+
+  if (state == SWITCH_CASE && previousCaseSkip != -1) {
+    patchJump(previousCaseSkip);
+    emitByte(OP_POP);
+  }
+  for (int i = 0; i < exitCount; ++i) {
+    patchJump(exitJumps[i]);
+  }
+  emitByte(OP_POP);
+  endScope();
+}
+
 static void whileStatement(void) {
   int loopStart = currentChunk()->count;
   consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'");
@@ -781,6 +851,8 @@ static void statement(void) {
     forStatement();
   } else if (match(TOKEN_IF)) {
     ifStatement();
+  } else if (match(TOKEN_SWITCH)) {
+    switchStatement();
   } else if (match(TOKEN_WHILE)) {
     whileStatement();
   } else if (match(TOKEN_LEFT_BRACE)) {

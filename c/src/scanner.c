@@ -180,6 +180,8 @@ static TokenType identifierType(void) {
         return checkKeyword(2, 3, "nst", TOKEN_CONST);
       case 'l':
         return checkKeyword(2, 3, "ass", TOKEN_CLASS);
+      case 'a':
+        return checkKeyword(2, 2, "se", TOKEN_CASE);
       }
     }
     break;
@@ -212,7 +214,17 @@ static TokenType identifierType(void) {
     }
     return checkKeyword(1, 1, "n", TOKEN_FUNCTION);
   case 's':
-    return checkKeyword(1, 3, "elf", TOKEN_SELF);
+    if (scanner.current - scanner.start > 1) {
+      switch (scanner.start[1]) {
+      case 'e':
+        return checkKeyword(2, 2, "lf", TOKEN_SELF);
+      case 'w':
+        return checkKeyword(2, 4, "itch", TOKEN_SWITCH);
+      }
+    }
+    break;
+  case 'd':
+    return checkKeyword(1, 6, "efault", TOKEN_DEFAULT);
   }
   return TOKEN_IDENTIFIER;
 }
