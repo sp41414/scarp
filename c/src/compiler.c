@@ -59,11 +59,18 @@ typedef struct {
   bool isConst;
 } Local;
 
+typedef struct Loop {
+  struct Loop *enclosing;
+  int scopeDepth;
+  int jumpAddress;
+} Loop;
+
 typedef struct {
   Local *locals;
   int localCount;
   int localCapacity;
   int scopeDepth;
+  Loop *currentLoop;
 } Compiler;
 
 Parser parser;
@@ -85,6 +92,7 @@ static void initCompiler(Compiler *compiler) {
   compiler->localCapacity = 0;
   compiler->localCount = 0;
   compiler->scopeDepth = 0;
+  compiler->currentLoop = NULL;
   current = compiler;
 }
 
@@ -240,7 +248,7 @@ static void endScope(void) {
   }
 
   while (n > 0) {
-    uint8_t toPop = n > 255 ? 255 : n;
+    uint8_t toPop = n > UINT8_MAX ? UINT8_MAX : n;
     emitBytes(OP_POPN, toPop);
     n -= toPop;
   }
@@ -511,6 +519,9 @@ ParseRule rules[] = {
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_LET] = {NULL, NULL, PREC_NONE},
     [TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
+    [TOKEN_SWITCH] = {NULL, NULL, PREC_NONE},
+    [TOKEN_BREAK] = {NULL, NULL, PREC_NONE},
+    [TOKEN_CONTINUE] = {NULL, NULL, PREC_NONE},
     [TOKEN_ERROR] = {NULL, NULL, PREC_NONE},
     [TOKEN_EOF] = {NULL, NULL, PREC_NONE},
 };
@@ -674,6 +685,18 @@ static void expressionStatement(void) {
   emitByte(OP_POP);
 }
 
+static inline void beginLoop(Loop *loop, int loopStart) {
+  loop->enclosing = current->currentLoop;
+  loop->scopeDepth = current->scopeDepth;
+  loop->jumpAddress = loopStart;
+
+  current->currentLoop = loop;
+}
+
+static inline void endLoop(void) {
+  current->currentLoop = current->currentLoop->enclosing;
+}
+
 static void forStatement(void) {
   beginScope();
   consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'");
@@ -709,6 +732,9 @@ static void forStatement(void) {
     patchJump(bodyLoop);
   }
 
+  Loop loop;
+  beginLoop(&loop, loopStart);
+
   statement();
   emitLoop(loopStart);
   if (exitJump != -1) {
@@ -716,6 +742,7 @@ static void forStatement(void) {
     emitByte(OP_POP);
   }
   endScope();
+  endLoop();
 }
 
 static void ifStatement(void) {
@@ -810,6 +837,9 @@ static void whileStatement(void) {
   expression();
   consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition");
 
+  Loop loop;
+  beginLoop(&loop, loopStart);
+
   int exitJump = emitJump(OP_JUMP_IF_FALSE);
   emitByte(OP_POP);
   statement();
@@ -817,6 +847,37 @@ static void whileStatement(void) {
 
   patchJump(exitJump);
   emitByte(OP_POP);
+
+  endLoop();
+}
+
+static void emitLoopPops(void) {
+  int localsToPop = 0;
+  for (int i = current->localCount - 1; i >= 0; --i) {
+    if (current->locals[i].depth > current->currentLoop->scopeDepth) {
+      localsToPop++;
+    } else {
+      break;
+    }
+  }
+
+  while (localsToPop > 0) {
+    uint8_t toPop = localsToPop > UINT8_MAX ? UINT8_MAX : localsToPop;
+    emitBytes(OP_POPN, localsToPop);
+    localsToPop -= toPop;
+  }
+}
+
+static void continueStatement(void) {
+  if (current->currentLoop == NULL)
+    error("Cannot use 'continue' outside of a loop");
+  consume(TOKEN_SEMICOLON, "Expect ';' after 'continue'");
+  emitLoopPops();
+  emitLoop(current->currentLoop->jumpAddress);
+}
+
+static void breakStatement(void) {
+  // TODO: break statement
 }
 
 static void varDeclaration(bool isConst) {
@@ -860,6 +921,10 @@ static void statement(void) {
     beginScope();
     block();
     endScope();
+  } else if (match(TOKEN_CONTINUE)) {
+    continueStatement();
+  } else if (match(TOKEN_BREAK)) {
+    breakStatement();
   } else {
     expressionStatement();
   }
