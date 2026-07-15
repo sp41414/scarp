@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "chunk.h"
 #include "object.h"
 #include "vm.h"
 #include <stdlib.h>
@@ -17,6 +18,12 @@ void *reallocate(void *pointer, size_t oldSize, size_t newSize) {
 
 static void freeObject(Obj *object) {
   switch (object->type) {
+  case OBJ_FUNCTION: {
+    ObjFunction *function = (ObjFunction *)object;
+    freeChunk(&function->chunk);
+    FREE(ObjFunction, object);
+    break;
+  }
   case OBJ_STRING: {
     ObjString *string = (ObjString *)object;
     reallocate(string, sizeof(ObjString) + string->length + 1, 0);

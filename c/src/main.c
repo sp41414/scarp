@@ -7,10 +7,15 @@ static void repl(void) {
   char line[1024];
   for (;;) {
     printf("> ");
+
     if (fgets(line, sizeof(line), stdin) == NULL) {
       printf("\n");
       break;
     }
+    if (line[0] == '\n' || line[0] == '\0') {
+      continue;
+    }
+
     interpret(line);
   }
 }
