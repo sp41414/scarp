@@ -12,8 +12,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 VM vm;
+
+static Value clockNative(int argCount, Value *args) {
+  return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
 
 static void resetStack(void) {
   vm.stackTop = vm.stack;
@@ -38,14 +43,25 @@ static void runtimeError(const char *fmt, ...) {
     const char *name =
         function->name == NULL ? "script" : function->name->chars;
     if (i == vm.frameCount - 1) {
-      fprintf(stderr, "  %s-->%s %s%s%s %s[%d:%d]%s\n", RED_BOLD, RESET, BOLD,
+      fprintf(stderr, "  %s-->%s %s%s%s %s(L%d:%d)%s\n", RED_BOLD, RESET, BOLD,
               name, RESET, GRAY, line, col, RESET);
     } else {
-      fprintf(stderr, "   %s|%s  %s %s[%d:%d]%s\n", GRAY, RESET, name, GRAY,
+      fprintf(stderr, "   %s|%s  %s %s(L%d:%d)%s\n", GRAY, RESET, name, GRAY,
               line, col, RESET);
     }
   }
   resetStack();
+}
+
+static void defineNative(const char *name, NativeFn function, int arity) {
+  push(OBJ_VAL(copyString(name, (int)strlen(name))));
+  push(OBJ_VAL(newNative(function, arity)));
+
+  int idx = vm.globalValues.count;
+  writeValueArray(&vm.globalValues, vm.stack[1]);
+  tableSet(&vm.globalNames, vm.stack[0], NUMBER_VAL((double)idx));
+
+  vm.stackTop -= 2;
 }
 
 void initVM(void) {
@@ -56,6 +72,8 @@ void initVM(void) {
   initTable(&vm.globalNames);
   initTable(&vm.strings);
   vm.objects = NULL;
+
+  defineNative("clock", clockNative, 0);
 }
 
 void freeVM(void) {
@@ -155,9 +173,16 @@ static void concatenate(void) {
   push(OBJ_VAL(string));
 }
 
+static inline bool checkArgCount(int argCount, int arity) {
+  if (argCount != arity) {
+    runtimeError("Expected %d arguments but got %d", arity, argCount);
+    return false;
+  }
+  return true;
+}
+
 static bool call(ObjFunction *function, uint8_t argCount) {
-  if (argCount != function->arity) {
-    runtimeError("Expected %d arguments but got %d", function->arity, argCount);
+  if (!checkArgCount(argCount, function->arity)) {
     return false;
   }
 
@@ -178,6 +203,17 @@ static bool callValue(Value callee, uint8_t argCount) {
     switch (OBJ_TYPE(callee)) {
     case OBJ_FUNCTION:
       return call(AS_FUNCTION(callee), argCount);
+    case OBJ_NATIVE: {
+      ObjNative *native = AS_NATIVE(callee);
+      if (!checkArgCount(argCount, native->arity)) {
+        return false;
+      }
+
+      Value result = native->function(argCount, vm.stackTop - argCount);
+      vm.stackTop -= argCount + 1;
+      push(result);
+      return true;
+    }
     default:
       break;
     }
