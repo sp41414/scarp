@@ -68,6 +68,8 @@ void initVM(void) {
   vm.stackCapacity = 256;
   vm.stack = malloc(vm.stackCapacity * sizeof(Value));
   resetStack();
+  vm.globalIsConst = NULL;
+  vm.globalFlagCapacity = 0;
   initValueArray(&vm.globalValues);
   initTable(&vm.globalNames);
   initTable(&vm.strings);
@@ -78,6 +80,9 @@ void initVM(void) {
 
 void freeVM(void) {
   freeObjects();
+  FREE_ARRAY(bool, vm.globalIsConst, vm.globalFlagCapacity);
+  vm.globalIsConst = NULL;
+  vm.globalFlagCapacity = 0;
   freeValueArray(&vm.globalValues);
   freeTable(&vm.globalNames);
   freeTable(&vm.strings);
@@ -100,8 +105,15 @@ void push(Value value) {
       vm.stackCapacity = STACK_MAX;
     ptrdiff_t offset = vm.stackTop - vm.stack;
 
+    Value *oldStack = vm.stack;
     vm.stack = GROW_ARRAY(Value, vm.stack, oldCapacity, vm.stackCapacity);
-    vm.stackTop = vm.stack + offset;
+    if (vm.stack != oldStack) {
+      vm.stackTop = vm.stack + offset;
+      for (int i = 0; i < vm.frameCount; ++i) {
+        ptrdiff_t slotsOffset = vm.frames[i].slots - oldStack;
+        vm.frames[i].slots = vm.stack + slotsOffset;
+      }
+    }
   }
 
   *vm.stackTop = value;
