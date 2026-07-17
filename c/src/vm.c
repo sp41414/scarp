@@ -139,15 +139,17 @@ static ObjString *stringify(Value value) {
   }
 
   runtimeError("Unknown type passed to stringify().");
-  exit(1);
+  return NULL;
 }
 
-static void concatenate(void) {
+static bool concatenate(void) {
   Value bValue = pop();
   Value aValue = pop();
 
   ObjString *b = IS_STRING(bValue) ? AS_STRING(bValue) : stringify(bValue);
   ObjString *a = IS_STRING(aValue) ? AS_STRING(aValue) : stringify(aValue);
+  if (!b || !a)
+    return false;
 
   int length = a->length + b->length;
   char *temp = ALLOCATE(char, length + 1);
@@ -161,7 +163,7 @@ static void concatenate(void) {
   if (interned != NULL) {
     FREE_ARRAY(char, temp, length + 1);
     push(OBJ_VAL(interned));
-    return;
+    return true;
   }
 
   ObjString *string = makeString(length, hash);
@@ -171,6 +173,7 @@ static void concatenate(void) {
 
   tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL);
   push(OBJ_VAL(string));
+  return true;
 }
 
 static inline bool checkArgCount(int argCount, int arity) {
@@ -268,21 +271,19 @@ static int32_t toInt32(double d) {
 
 static InterpretResult run(void) {
   CallFrame *frame = &vm.frames[vm.frameCount - 1];
+  register uint8_t *ip = frame->ip;
 
-#define READ_BYTE() (*frame->ip++)
-#define READ_SHORT()                                                           \
-  (frame->ip += 2, (uint16_t)(frame->ip[-2] | (frame->ip[-1] << 8)))
-#define READ_LONG()                                                            \
-  (frame->ip += 3,                                                             \
-   (int)(frame->ip[-3] | (frame->ip[-2] << 8) | (frame->ip[-1] << 16)))
+#define READ_BYTE() (*ip++)
+#define READ_SHORT() (ip += 2, (uint16_t)(ip[-2] | (ip[-1] << 8)))
+#define READ_LONG() (ip += 3, (int)(ip[-3] | (ip[-2] << 8) | (ip[-1] << 16)))
 #define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
 #define READ_CONSTANT_LONG()                                                   \
-  (frame->ip += 3,                                                             \
-   frame->function->chunk.constants                                            \
-       .values[frame->ip[-3] | (frame->ip[-2] << 8) | (frame->ip[-1] << 16)])
+  (ip += 3, frame->function->chunk.constants                                   \
+                .values[ip[-3] | (ip[-2] << 8) | (ip[-1] << 16)])
 #define BINARY_OP(valueType, op)                                               \
   do {                                                                         \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
+      frame->ip = ip;                                                          \
       runtimeError("Operands must be numbers.");                               \
       return INTERPRET_RUNTIME_ERROR;                                          \
     }                                                                          \
@@ -294,6 +295,7 @@ static InterpretResult run(void) {
 #define BINARY_BITWISE_OP(valueType, op)                                       \
   do {                                                                         \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
+      frame->ip = ip;                                                          \
       runtimeError("Operands must be numbers.");                               \
       return INTERPRET_RUNTIME_ERROR;                                          \
     }                                                                          \
@@ -307,7 +309,7 @@ static InterpretResult run(void) {
 #ifdef DEBUG_TRACE_EXECUTION
     traceStack(&vm);
     disassembleInstruction(&frame->function->chunk,
-                           (int)(frame->ip - frame->function->chunk.code));
+                           (int)(ip - frame->function->chunk.code));
 #endif
 
     uint8_t instruction;
@@ -359,6 +361,7 @@ static InterpretResult run(void) {
     case OP_GET_GLOBAL: {
       Value value = vm.globalValues.values[READ_BYTE()];
       if (IS_UNDEFINED(value)) {
+        frame->ip = ip;
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -368,6 +371,7 @@ static InterpretResult run(void) {
     case OP_GET_GLOBAL_LONG: {
       Value value = vm.globalValues.values[READ_LONG()];
       if (IS_UNDEFINED(value)) {
+        frame->ip = ip;
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -417,10 +421,12 @@ static InterpretResult run(void) {
     case OP_SET_GLOBAL: {
       uint8_t idx = READ_BYTE();
       if (IS_UNDEFINED(vm.globalValues.values[idx])) {
+        frame->ip = ip;
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
       if (vm.globalIsConst[idx]) {
+        frame->ip = ip;
         runtimeError("Cannot reassign to a constant variable");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -430,10 +436,12 @@ static InterpretResult run(void) {
     case OP_SET_GLOBAL_LONG: {
       int idx = READ_LONG();
       if (IS_UNDEFINED(vm.globalValues.values[idx])) {
+        frame->ip = ip;
         runtimeError("Undefined variable");
         return INTERPRET_RUNTIME_ERROR;
       }
       if (vm.globalIsConst[idx]) {
+        frame->ip = ip;
         runtimeError("Cannot reassign to a constant variable");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -452,6 +460,7 @@ static InterpretResult run(void) {
     }
     case OP_GREATER:
     case OP_LESS: {
+      frame->ip = ip;
       if (comparison(instruction) == INTERPRET_RUNTIME_ERROR) {
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -459,6 +468,7 @@ static InterpretResult run(void) {
     }
     case OP_NEGATE: {
       if (!IS_NUMBER(peek(0))) {
+        frame->ip = ip;
         runtimeError("Operand must be a number.");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -467,6 +477,7 @@ static InterpretResult run(void) {
     }
     case OP_BIN_NOT: {
       if (!IS_NUMBER(peek(0))) {
+        frame->ip = ip;
         runtimeError("Operand must be a number.");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -481,26 +492,28 @@ static InterpretResult run(void) {
     }
     case OP_JUMP: {
       uint16_t offset = READ_SHORT();
-      frame->ip += offset;
+      ip += offset;
       break;
     }
     case OP_JUMP_IF_FALSE: {
       uint16_t offset = READ_SHORT();
       if (isFalsey(peek(0)))
-        frame->ip += offset;
+        ip += offset;
       break;
     }
     case OP_LOOP: {
       uint16_t offset = READ_SHORT();
-      frame->ip -= offset;
+      ip -= offset;
       break;
     }
     case OP_CALL: {
       uint8_t argCount = READ_BYTE();
+      frame->ip = ip;
       if (!callValue(peek(argCount), argCount)) {
         return INTERPRET_RUNTIME_ERROR;
       }
       frame = &vm.frames[vm.frameCount - 1];
+      ip = frame->ip;
       break;
     }
     case OP_ADD: {
@@ -511,9 +524,13 @@ static InterpretResult run(void) {
         break;
       }
       if (IS_STRING(peek(0)) || IS_STRING(peek(1))) {
-        concatenate();
+        frame->ip = ip;
+        if (!concatenate()) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
         break;
       }
+      frame->ip = ip;
       runtimeError("Operands must be two numbers or a string and any type.");
       return INTERPRET_RUNTIME_ERROR;
     }
@@ -551,6 +568,7 @@ static InterpretResult run(void) {
     }
     case OP_BIN_SHIFT_RIGHT_UNSIGNED: {
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {
+        frame->ip = ip;
         runtimeError("Operands must be numbers.");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -572,6 +590,7 @@ static InterpretResult run(void) {
       vm.stackTop = frame->slots;
       push(result);
       frame = &vm.frames[vm.frameCount - 1];
+      ip = frame->ip;
       break;
     }
     }
