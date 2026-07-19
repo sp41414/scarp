@@ -1099,23 +1099,27 @@ static void function(FunctionType type) {
   consume(TOKEN_LEFT_BRACE, "Expect '{' before function body");
   block();
 
-  ObjFunction *function = current->function;
-  int upvalueCount = function->upvalueCount;
+  ObjFunction *tempFunction = current->function;
+  int upvalueCount = tempFunction->upvalueCount;
 
   Upvalue tempUpvalues[upvalueCount];
   for (int i = 0; i < upvalueCount; ++i) {
     tempUpvalues[i] = current->upvalues[i];
   }
 
-  endCompiler();
+  ObjFunction *function = endCompiler();
 
-  emitClosure(OBJ_VAL(function));
+  if (function->upvalueCount > 0) {
+    emitClosure(OBJ_VAL(function));
 
-  for (int i = 0; i < upvalueCount; ++i) {
-    Upvalue upvalue = tempUpvalues[i];
-    emitByte(upvalue.isLocal ? 1 : 0);
+    for (int i = 0; i < upvalueCount; ++i) {
+      Upvalue upvalue = tempUpvalues[i];
+      emitByte(upvalue.isLocal ? 1 : 0);
 
-    emitBytes(upvalue.index & 0xff, ((upvalue.index >> 8) & 0xff));
+      emitBytes(upvalue.index & 0xff, ((upvalue.index >> 8) & 0xff));
+    }
+  } else {
+    emitConstant(OBJ_VAL(function));
   }
 }
 
