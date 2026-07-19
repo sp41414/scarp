@@ -1,5 +1,6 @@
 #include "debug.h"
 #include "chunk.h"
+#include "object.h"
 #include "table.h"
 #include "value.h"
 #include "vm.h"
@@ -30,7 +31,7 @@ static int simpleInstruction(const char *name, int offset) {
 }
 
 static int constantInstruction(const char *name, Chunk *chunk, int offset) {
-  uint8_t constant = chunk->code[offset + 1];
+  uint8_t constant = GET_INDEX(chunk, offset);
   printf("%-16s %4d '", name, constant);
   printValue(chunk->constants.values[constant]);
   printf("'\n");
@@ -38,8 +39,7 @@ static int constantInstruction(const char *name, Chunk *chunk, int offset) {
 }
 
 static int longConstantInstruction(const char *name, Chunk *chunk, int offset) {
-  uint32_t constant = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8) |
-                      (chunk->code[offset + 3] << 16);
+  uint32_t constant = GET_LONG_INDEX(chunk, offset);
   printf("%-16s %4d '", name, constant);
   printValue(chunk->constants.values[constant]);
   printf("'\n");
@@ -60,7 +60,7 @@ static void printGlobalName(int slot) {
 }
 
 static int globalInstruction(const char *name, Chunk *chunk, int offset) {
-  uint8_t slot = chunk->code[offset + 1];
+  uint8_t slot = GET_INDEX(chunk, offset);
   printf("%-16s %4d '", name, slot);
   printGlobalName(slot);
   printf("'\n");
@@ -68,8 +68,7 @@ static int globalInstruction(const char *name, Chunk *chunk, int offset) {
 }
 
 static int longGlobalInstruction(const char *name, Chunk *chunk, int offset) {
-  int slot = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8) |
-             (chunk->code[offset + 3] << 16);
+  uint32_t slot = GET_LONG_INDEX(chunk, offset);
   printf("%-16s %4d '", name, slot);
   printGlobalName(slot);
   printf("'\n");
@@ -77,22 +76,63 @@ static int longGlobalInstruction(const char *name, Chunk *chunk, int offset) {
 }
 
 static int byteInstruction(const char *name, Chunk *chunk, int offset) {
-  uint8_t slot = chunk->code[offset + 1];
+  uint8_t slot = GET_INDEX(chunk, offset);
   printf("%-16s %4d\n", name, slot);
   return offset + 2;
 }
 
 static int longByteInstruction(const char *name, Chunk *chunk, int offset) {
-  uint16_t slot = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8);
+  uint16_t slot = GET_SHORT_INDEX(chunk, offset);
   printf("%-16s %4d\n", name, slot);
   return offset + 3;
 }
 
 static int jumpInstruction(const char *name, int sign, Chunk *chunk,
                            int offset) {
-  uint16_t jump = chunk->code[offset + 1] | (chunk->code[offset + 2] << 8);
+  uint16_t jump = GET_SHORT_INDEX(chunk, offset);
   printf("%-16s %4d -> %4d\n", name, offset, offset + 3 + sign * jump);
   return offset + 3;
+}
+
+static int closureInstruction(Chunk *chunk, int offset) {
+  uint8_t constant = GET_INDEX(chunk, offset);
+  printf("%-16s %4d ", "OP_CLOSURE", constant);
+  printValue(chunk->constants.values[constant]);
+  printf("\n");
+  offset += 2;
+
+  ObjFunction *function = AS_FUNCTION(chunk->constants.values[constant]);
+  for (int j = 0; j < function->upvalueCount; ++j) {
+    uint8_t isLocal = chunk->code[offset++];
+    int idx = GET_SHORT_INDEX(chunk, offset);
+
+    offset += 2;
+
+    printf("%04d      |                     %s %d\n", offset - 3,
+           isLocal ? "local" : "upvalue", idx);
+  }
+  return offset;
+}
+
+static int longClosureInstruction(Chunk *chunk, int offset) {
+  uint32_t constant = GET_LONG_INDEX(chunk, offset);
+  printf("%-16s %4d '", "OP_CLOSURE_LONG", constant);
+  printValue(chunk->constants.values[constant]);
+  printf("'\n");
+  offset += 4;
+
+  ObjFunction *function = AS_FUNCTION(chunk->constants.values[constant]);
+  for (int j = 0; j < function->upvalueCount; ++j) {
+    uint8_t isLocal = chunk->code[offset++];
+    int idx = GET_SHORT_INDEX(chunk, offset);
+
+    offset += 2;
+
+    printf("%04d      |                     %s %d\n", offset - 3,
+           isLocal ? "local" : "upvalue", idx);
+  }
+
+  return offset;
 }
 
 int disassembleInstruction(Chunk *chunk, int offset) {
@@ -132,6 +172,14 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return globalInstruction("OP_SET_GLOBAL", chunk, offset);
   case OP_SET_GLOBAL_LONG:
     return longGlobalInstruction("OP_SET_GLOBAL_LONG", chunk, offset);
+  case OP_GET_UPVALUE:
+    return byteInstruction("OP_GET_UPVALUE", chunk, offset);
+  case OP_SET_UPVALUE:
+    return byteInstruction("OP_SET_UPVALUE", chunk, offset);
+  case OP_GET_UPVALUE_LONG:
+    return longByteInstruction("OP_GET_UPVALUE_LONG", chunk, offset);
+  case OP_SET_UPVALUE_LONG:
+    return longByteInstruction("OP_SET_UPVALUE_LONG", chunk, offset);
   case OP_NIL:
     return simpleInstruction("OP_NIL", offset);
   case OP_TRUE:
@@ -168,6 +216,12 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return jumpInstruction("OP_LOOP", -1, chunk, offset);
   case OP_CALL:
     return byteInstruction("OP_CALL", chunk, offset);
+  case OP_CLOSURE:
+    return closureInstruction(chunk, offset);
+  case OP_CLOSURE_LONG:
+    return longClosureInstruction(chunk, offset);
+  case OP_CLOSE_UPVALUE:
+    return simpleInstruction("OP_CLOSE_UPVALUE", offset);
   case OP_NOT:
     return simpleInstruction("OP_NOT", offset);
   case OP_ADD:

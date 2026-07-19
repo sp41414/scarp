@@ -58,6 +58,7 @@ typedef struct {
   Token name;
   int depth;
   bool isConst;
+  bool isCaptured;
 } Local;
 
 typedef struct Loop {
@@ -68,12 +69,19 @@ typedef struct Loop {
   int breakCount;
 } Loop;
 
+typedef struct {
+  uint16_t index;
+  bool isLocal;
+} Upvalue;
+
 typedef enum { TYPE_SCRIPT, TYPE_FUNCTION } FunctionType;
 
 typedef struct Compiler {
   struct Compiler *enclosing;
   ObjFunction *function;
   FunctionType type;
+  Upvalue *upvalues;
+  int upvalueCapacity;
   Local *locals;
   int localCount;
   int localCapacity;
@@ -94,7 +102,7 @@ static void varDeclaration(bool isConst);
 static ParseRule *getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
-static inline void growLocalsCapacity(Compiler *compiler) {
+static void growLocalsCapacity(Compiler *compiler) {
   if (compiler->localCapacity < compiler->localCount + 1) {
     int oldCapacity = compiler->localCapacity;
     compiler->localCapacity = GROW_CAPACITY(oldCapacity);
@@ -107,16 +115,32 @@ static inline void growLocalsCapacity(Compiler *compiler) {
   }
 }
 
+static void growUpvaluesCapacity(Compiler *compiler) {
+  if (compiler->upvalueCapacity < compiler->function->upvalueCount + 1) {
+    int oldCapacity = compiler->upvalueCapacity;
+    compiler->upvalueCapacity = GROW_CAPACITY(oldCapacity);
+
+    if (compiler->upvalueCapacity > UINT16_MAX)
+      compiler->upvalueCapacity = UINT16_MAX;
+
+    compiler->upvalues = GROW_ARRAY(Upvalue, compiler->upvalues, oldCapacity,
+                                    compiler->upvalueCapacity);
+  }
+}
+
 static void initCompiler(Compiler *compiler, FunctionType type) {
   compiler->enclosing = current;
   compiler->function = NULL;
   compiler->scopeDepth = 0;
   compiler->type = type;
+  compiler->upvalues = NULL;
+  compiler->upvalueCapacity = 0;
   compiler->localCapacity = 0;
   compiler->localCount = 0;
   compiler->locals = NULL;
   growLocalsCapacity(compiler);
   compiler->function = newFunction();
+  growUpvaluesCapacity(compiler);
   current = compiler;
 
   if (type == TYPE_FUNCTION) {
@@ -128,6 +152,7 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
   local->depth = 0;
   local->name.start = "";
   local->name.length = 0;
+  local->isCaptured = false;
 }
 
 static Chunk *currentChunk(void) { return &current->function->chunk; }
@@ -250,6 +275,15 @@ static void emitConstant(Value value) {
   }
 }
 
+static void emitClosure(Value closure) {
+  int constant = makeConstant(closure);
+  if (constant <= UINT8_MAX) {
+    emitBytes(OP_CLOSURE, (uint8_t)constant);
+  } else {
+    emitLongBytes(OP_CLOSURE_LONG, constant);
+  }
+}
+
 static void patchJump(int offset) {
   int jump = currentChunk()->count - offset - 2;
   if (jump > UINT16_MAX) {
@@ -263,6 +297,7 @@ static void patchJump(int offset) {
 static ObjFunction *endCompiler(void) {
   emitReturn();
   FREE_ARRAY(Local, current->locals, current->localCapacity);
+  FREE_ARRAY(Upvalue, current->upvalues, current->upvalueCapacity);
   ObjFunction *function = current->function;
 #ifdef DEBUG_PRINT_CODE
   if (!parser.hadError) {
@@ -282,7 +317,16 @@ static void endScope(void) {
   int n = 0;
   while (current->localCount > 0 &&
          current->locals[current->localCount - 1].depth > current->scopeDepth) {
-    n++;
+    if (current->locals[current->localCount - 1].isCaptured) {
+      while (n > 0) {
+        uint8_t toPop = n > UINT8_MAX ? UINT8_MAX : n;
+        emitBytes(OP_POPN, toPop);
+        n -= toPop;
+      }
+      emitByte(OP_CLOSE_UPVALUE);
+    } else {
+      n++;
+    }
     current->localCount--;
   }
 
@@ -458,6 +502,45 @@ static int resolveLocal(Compiler *compiler, Token *name) {
   return -1;
 }
 
+static int addUpvalue(Compiler *compiler, int idx, bool isLocal) {
+  int upvalueCount = compiler->function->upvalueCount;
+  if (upvalueCount == UINT16_MAX) {
+    error("Too many closure variables in function");
+    return 0;
+  }
+
+  for (int i = 0; i < upvalueCount; ++i) {
+    Upvalue *upvalue = &compiler->upvalues[i];
+    if (upvalue->index == idx && upvalue->isLocal == isLocal) {
+      return i;
+    }
+  }
+
+  growUpvaluesCapacity(compiler);
+
+  compiler->upvalues[upvalueCount].isLocal = isLocal;
+  compiler->upvalues[upvalueCount].index = idx;
+  return compiler->function->upvalueCount++;
+}
+
+static int resolveUpvalue(Compiler *compiler, Token *name) {
+  if (compiler->enclosing == NULL)
+    return -1;
+
+  int local = resolveLocal(compiler->enclosing, name);
+  if (local != -1) {
+    compiler->enclosing->locals[local].isCaptured = true;
+    return addUpvalue(compiler, local, true);
+  }
+
+  int upvalue = resolveUpvalue(compiler->enclosing, name);
+  if (upvalue != -1) {
+    return addUpvalue(compiler, upvalue, false);
+  }
+
+  return -1;
+}
+
 static void namedVariable(Token name, bool canAssign) {
   uint8_t getOp, setOp;
   bool isLocalConst = false;
@@ -472,6 +555,14 @@ static void namedVariable(Token name, bool canAssign) {
       setOp = OP_SET_LOCAL_LONG;
     }
     isLocalConst = current->locals[arg].isConst;
+  } else if ((arg = resolveUpvalue(current, &name)) != -1) {
+    if (arg <= UINT8_MAX) {
+      getOp = OP_GET_UPVALUE;
+      setOp = OP_SET_UPVALUE;
+    } else {
+      getOp = OP_GET_UPVALUE_LONG;
+      setOp = OP_SET_UPVALUE_LONG;
+    }
   } else {
     arg = identifierConstant(&name);
     if (arg <= UINT8_MAX) {
@@ -644,6 +735,7 @@ static void addLocal(bool isConst, Token token) {
   local->name = token;
   local->depth = -1;
   local->isConst = isConst;
+  local->isCaptured = false;
 }
 
 static void declareVariable(bool isConst) {
@@ -921,7 +1013,7 @@ static void emitLoopPops(void) {
 
   while (localsToPop > 0) {
     uint8_t toPop = localsToPop > UINT8_MAX ? UINT8_MAX : localsToPop;
-    emitBytes(OP_POPN, localsToPop);
+    emitBytes(OP_POPN, toPop);
     localsToPop -= toPop;
   }
 }
@@ -998,7 +1090,7 @@ static void function(FunctionType type) {
       if (current->function->arity > 255) {
         errorAtCurrent("Cannot define more than 255 parameters");
       }
-      uint8_t constant = parseVariable(false, "Expected parameter name");
+      int constant = parseVariable(false, "Expected parameter name");
       defineVariable(false, constant);
     } while (match(TOKEN_COMMA));
   }
@@ -1007,12 +1099,28 @@ static void function(FunctionType type) {
   consume(TOKEN_LEFT_BRACE, "Expect '{' before function body");
   block();
 
-  ObjFunction *function = endCompiler();
-  emitBytes(OP_CONSTANT, makeConstant(OBJ_VAL(function)));
+  ObjFunction *function = current->function;
+  int upvalueCount = function->upvalueCount;
+
+  Upvalue tempUpvalues[upvalueCount];
+  for (int i = 0; i < upvalueCount; ++i) {
+    tempUpvalues[i] = current->upvalues[i];
+  }
+
+  endCompiler();
+
+  emitClosure(OBJ_VAL(function));
+
+  for (int i = 0; i < upvalueCount; ++i) {
+    Upvalue upvalue = tempUpvalues[i];
+    emitByte(upvalue.isLocal ? 1 : 0);
+
+    emitBytes(upvalue.index & 0xff, ((upvalue.index >> 8) & 0xff));
+  }
 }
 
 static void fnDeclaration(void) {
-  uint8_t global = parseVariable(false, "Expect function name");
+  int global = parseVariable(false, "Expect function name");
   markInitialized();
   function(TYPE_FUNCTION);
   defineVariable(false, global);
