@@ -236,6 +236,11 @@ static void emitBytes(uint8_t byte1, uint8_t byte2) {
   emitByte(byte2);
 }
 
+static void emitShortBytes(OpCode code, int byte) {
+  emitBytes(code, (uint8_t)(byte & 0xff));
+  emitByte((uint8_t)((byte >> 8) & 0xff));
+}
+
 static void emitLongBytes(OpCode code, int byte) {
   emitBytes(code, (uint8_t)(byte & 0xff));
   emitBytes((uint8_t)((byte >> 8) & 0xff), (uint8_t)((byte >> 16) & 0xff));
@@ -582,8 +587,7 @@ static void namedVariable(Token name, bool canAssign) {
     if (arg <= UINT8_MAX) {
       emitBytes(setOp, arg);
     } else if (setOp == OP_SET_LOCAL_LONG) {
-      emitByte(setOp);
-      emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
+      emitShortBytes(setOp, arg);
     } else {
       emitLongBytes(setOp, arg);
     }
@@ -591,8 +595,7 @@ static void namedVariable(Token name, bool canAssign) {
     if (arg <= UINT8_MAX) {
       emitBytes(getOp, arg);
     } else if (getOp == OP_GET_LOCAL_LONG) {
-      emitByte(getOp);
-      emitBytes((uint8_t)(arg & 0xff), (uint8_t)((arg >> 8) & 0xff));
+      emitShortBytes(getOp, arg);
     } else {
       emitLongBytes(getOp, arg);
     }
@@ -845,11 +848,19 @@ static void forStatement(void) {
   beginScope();
   consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'");
 
+  int loopVariable = -1;
+  Token loopVariableName;
+
+  bool isConst = false;
+
   if (match(TOKEN_SEMICOLON)) {
   } else if (match(TOKEN_LET)) {
+    loopVariableName = parser.current;
     varDeclaration(false);
+    loopVariable = current->localCount - 1;
   } else if (match(TOKEN_CONST)) {
-    varDeclaration(true);
+    isConst = true;
+    varDeclaration(isConst);
   } else {
     expressionStatement();
   }
@@ -879,7 +890,39 @@ static void forStatement(void) {
   Loop loop;
   beginLoop(&loop, loopStart);
 
+  int innerLoopVariable = -1;
+  if (loopVariable != -1 && !isConst) {
+    beginScope();
+    if (loopVariable <= UINT8_MAX) {
+      emitBytes(OP_GET_LOCAL, loopVariable);
+    } else {
+      emitShortBytes(OP_GET_LOCAL_LONG, loopVariable);
+    }
+    addLocal(false, loopVariableName);
+    markInitialized();
+
+    innerLoopVariable = current->localCount - 1;
+  }
+
   statement();
+
+  if (loopVariable != -1 && !isConst) {
+    if (innerLoopVariable <= UINT8_MAX) {
+      emitBytes(OP_GET_LOCAL, innerLoopVariable);
+    } else {
+      emitShortBytes(OP_GET_LOCAL_LONG, innerLoopVariable);
+    }
+
+    if (loopVariable <= UINT8_MAX) {
+      emitBytes(OP_SET_LOCAL, loopVariable);
+    } else {
+      emitShortBytes(OP_SET_LOCAL_LONG, loopVariable);
+    }
+
+    emitByte(OP_POP);
+    endScope();
+  }
+
   emitLoop(loopStart);
   if (exitJump != -1) {
     patchJump(exitJump);
@@ -1114,9 +1157,7 @@ static void function(FunctionType type) {
 
     for (int i = 0; i < upvalueCount; ++i) {
       Upvalue upvalue = tempUpvalues[i];
-      emitByte(upvalue.isLocal ? 1 : 0);
-
-      emitBytes(upvalue.index & 0xff, ((upvalue.index >> 8) & 0xff));
+      emitShortBytes(upvalue.isLocal ? 1 : 0, upvalue.index);
     }
   } else {
     emitConstant(OBJ_VAL(function));
