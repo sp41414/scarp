@@ -63,3 +63,9 @@ bool valuesEqual(Value a, Value b) {
     return false;
   }
 }
+
+void markArray(ValueArray *array) {
+  for (int i = 0; i < array->count; i++) {
+    markValue(array->values[i]);
+  }
+}

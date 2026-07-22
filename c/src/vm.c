@@ -62,11 +62,28 @@ static void runtimeError(const char *fmt, ...) {
   resetStack();
 }
 
+static void growFlagCapacity(int idx) {
+  if (idx < vm.globalFlagCapacity)
+    return;
+
+  int oldCapacity = vm.globalFlagCapacity;
+  vm.globalFlagCapacity = GROW_CAPACITY(oldCapacity);
+  if (vm.globalFlagCapacity <= idx)
+    vm.globalFlagCapacity = idx + 1;
+
+  vm.globalIsConst =
+      GROW_ARRAY(bool, vm.globalIsConst, oldCapacity, vm.globalFlagCapacity);
+  for (int i = oldCapacity; i < vm.globalFlagCapacity; ++i) {
+    vm.globalIsConst[i] = false;
+  }
+}
+
 static void defineNative(const char *name, NativeFn function, int arity) {
   push(OBJ_VAL(copyString(name, (int)strlen(name))));
   push(OBJ_VAL(newNative(function, arity)));
 
   int idx = vm.globalValues.count;
+  growFlagCapacity(idx + 1);
   writeValueArray(&vm.globalValues, vm.stack[1]);
   tableSet(&vm.globalNames, vm.stack[0], NUMBER_VAL((double)idx));
 
@@ -82,15 +99,21 @@ void initVM(void) {
   initValueArray(&vm.globalValues);
   initTable(&vm.globalNames);
   initTable(&vm.strings);
+
   vm.objects = NULL;
+  vm.bytesAllocated = 0;
+  vm.nextGC = 1024 * 1024;
+
+  vm.grayCount = 0;
+  vm.grayCapacity = 0;
+  vm.grayStack = NULL;
 
   defineNative("clock", clockNative, 0);
 }
 
 void freeVM(void) {
   freeObjects();
-  FREE_ARRAY(bool, vm.globalIsConst, vm.globalFlagCapacity);
-  vm.globalIsConst = NULL;
+  free(vm.globalIsConst);
   vm.globalFlagCapacity = 0;
   freeValueArray(&vm.globalValues);
   freeTable(&vm.globalNames);
@@ -121,11 +144,17 @@ void push(Value value) {
 
     Value *oldStack = vm.stack;
     vm.stack = GROW_ARRAY(Value, vm.stack, oldCapacity, vm.stackCapacity);
+
     if (vm.stack != oldStack) {
       vm.stackTop = vm.stack + offset;
       for (int i = 0; i < vm.frameCount; ++i) {
         ptrdiff_t slotsOffset = vm.frames[i].slots - oldStack;
         vm.frames[i].slots = vm.stack + slotsOffset;
+      }
+
+      for (ObjUpvalue *upvalue = vm.openUpvalues; upvalue != NULL;
+           upvalue = upvalue->next) {
+        upvalue->location = vm.stack + (upvalue->location - oldStack);
       }
     }
   }
@@ -164,13 +193,19 @@ static ObjString *stringify(Value value) {
 }
 
 static bool concatenate(void) {
-  Value bValue = pop();
-  Value aValue = pop();
-
+  Value bValue = peek(0);
   ObjString *b = IS_STRING(bValue) ? AS_STRING(bValue) : stringify(bValue);
-  ObjString *a = IS_STRING(aValue) ? AS_STRING(aValue) : stringify(aValue);
-  if (!b || !a)
+  if (!b)
     return false;
+  push(OBJ_VAL(b));
+
+  Value aValue = peek(2);
+  ObjString *a = IS_STRING(aValue) ? AS_STRING(aValue) : stringify(aValue);
+  if (!a) {
+    pop();
+    return false;
+  }
+  push(OBJ_VAL(a));
 
   int length = a->length + b->length;
   char *temp = ALLOCATE(char, length + 1);
@@ -183,6 +218,7 @@ static bool concatenate(void) {
   ObjString *interned = tableFindString(&vm.strings, temp, length, hash);
   if (interned != NULL) {
     FREE_ARRAY(char, temp, length + 1);
+    vm.stackTop -= 4;
     push(OBJ_VAL(interned));
     return true;
   }
@@ -192,7 +228,9 @@ static bool concatenate(void) {
   string->chars[length] = '\0';
   FREE_ARRAY(char, temp, length + 1);
 
+  push(OBJ_VAL(string));
   tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL);
+  vm.stackTop -= 5;
   push(OBJ_VAL(string));
   return true;
 }
@@ -298,22 +336,6 @@ static InterpretResult comparison(uint8_t op) {
     return INTERPRET_RUNTIME_ERROR;
   }
   return INTERPRET_OK;
-}
-
-static void growFlagCapacity(int idx) {
-  if (idx < vm.globalFlagCapacity)
-    return;
-
-  int oldCapacity = vm.globalFlagCapacity;
-  vm.globalFlagCapacity = GROW_CAPACITY(oldCapacity);
-  if (vm.globalFlagCapacity <= idx)
-    vm.globalFlagCapacity = idx + 1;
-
-  vm.globalIsConst =
-      GROW_ARRAY(bool, vm.globalIsConst, oldCapacity, vm.globalFlagCapacity);
-  for (int i = oldCapacity; i < vm.globalFlagCapacity; ++i) {
-    vm.globalIsConst[i] = false;
-  }
 }
 
 // from ECMAScript RFC
@@ -598,6 +620,7 @@ static InterpretResult run(void) {
     case OP_CLOSURE: {
       ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
       ObjClosure *closure = newClosure(function);
+      push(OBJ_VAL(closure));
 
       for (int i = 0; i < closure->upvalueCount; ++i) {
         uint8_t isLocal = READ_BYTE();
@@ -610,7 +633,6 @@ static InterpretResult run(void) {
         }
       }
 
-      push(OBJ_VAL(closure));
       break;
     }
     case OP_CLOSURE_LONG: {

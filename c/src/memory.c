@@ -1,10 +1,29 @@
 #include "memory.h"
 #include "chunk.h"
+#include "compiler.h"
 #include "object.h"
+#include "value.h"
 #include "vm.h"
 #include <stdlib.h>
+#ifdef DEBUG_LOG_GC
+#include "debug.h"
+#include <stdio.h>
+#endif
+
+#define GC_HEAP_GROW_FACTOR 2
 
 void *reallocate(void *pointer, size_t oldSize, size_t newSize) {
+  vm.bytesAllocated += newSize - oldSize;
+  if (newSize > oldSize) {
+#ifdef DEBUG_STRESS_GC
+    collectGarbage();
+#else
+    if (vm.bytesAllocated > vm.nextGC) {
+      collectGarbage();
+    }
+#endif
+  }
+
   if (newSize == 0) {
     free(pointer);
     return NULL;
@@ -17,6 +36,10 @@ void *reallocate(void *pointer, size_t oldSize, size_t newSize) {
 }
 
 static void freeObject(Obj *object) {
+#ifdef DEBUG_LOG_GC
+  printf("%p free type %d\n", (void *)object, object->type);
+#endif
+
   switch (object->type) {
   case OBJ_CLOSURE: {
     ObjClosure *closure = (ObjClosure *)object;
@@ -46,6 +69,139 @@ static void freeObject(Obj *object) {
   }
 }
 
+static void blackenObject(Obj *object) {
+#ifdef DEBUG_LOG_GC
+  printf("%p blacken ", (void *)object);
+  printValue(OBJ_VAL(object));
+  printf("\n");
+#endif
+
+  switch (object->type) {
+  case OBJ_CLOSURE: {
+    ObjClosure *closure = (ObjClosure *)object;
+    markObject((Obj *)closure->function);
+    for (int i = 0; i < closure->upvalueCount; i++) {
+      markObject((Obj *)closure->upvalues[i]);
+    }
+    break;
+  }
+  case OBJ_FUNCTION: {
+    ObjFunction *function = (ObjFunction *)object;
+    markObject((Obj *)function->name);
+    markArray(&function->chunk.constants);
+    break;
+  }
+  case OBJ_UPVALUE:
+    markValue(((ObjUpvalue *)object)->closed);
+    break;
+  case OBJ_NATIVE:
+  case OBJ_STRING:
+    break;
+  }
+}
+
+void markObject(Obj *obj) {
+  if (obj == NULL)
+    return;
+  if (obj->isMarked)
+    return;
+#ifdef DEBUG_LOG_GC
+  printf("%p mark ", (void *)obj);
+  printValue(OBJ_VAL(obj));
+  printf("\n");
+#endif
+
+  obj->isMarked = true;
+
+  if (obj->type == OBJ_STRING || obj->type == OBJ_NATIVE)
+    return;
+
+  if (vm.grayCapacity < vm.grayCount + 1) {
+    vm.grayCapacity = GROW_CAPACITY(vm.grayCapacity);
+    vm.grayStack =
+        (Obj **)realloc(vm.grayStack, sizeof(Obj *) * vm.grayCapacity);
+    if (vm.grayStack == NULL)
+      exit(1);
+  }
+
+  vm.grayStack[vm.grayCount++] = obj;
+}
+
+void markValue(Value value) {
+  if (IS_OBJ(value))
+    markObject(AS_OBJ(value));
+}
+
+static void markRoots(void) {
+  for (Value *slot = vm.stack; slot < vm.stackTop; slot++) {
+    markValue(*slot);
+  }
+
+  for (int i = 0; i < vm.frameCount; i++) {
+    markObject(vm.frames[i].function);
+  }
+
+  for (ObjUpvalue *upvalue = vm.openUpvalues; upvalue != NULL;
+       upvalue = upvalue->next) {
+    markObject((Obj *)upvalue);
+  }
+
+  markArray(&vm.globalValues);
+  markTable(&vm.globalNames);
+  markCompilerRoots();
+}
+
+static void traceReferences(void) {
+  while (vm.grayCount > 0) {
+    Obj *object = vm.grayStack[--vm.grayCount];
+    blackenObject(object);
+  }
+}
+
+static void sweep(void) {
+  Obj *prev = NULL;
+  Obj *object = vm.objects;
+
+  while (object != NULL) {
+    if (object->isMarked) {
+      object->isMarked = false;
+      prev = object;
+      object = object->next;
+    } else {
+      Obj *unreached = object;
+      object = object->next;
+
+      if (prev != NULL) {
+        prev->next = object;
+      } else {
+        vm.objects = object;
+      }
+
+      freeObject(unreached);
+    }
+  }
+}
+
+void collectGarbage(void) {
+#ifdef DEBUG_LOG_GC
+  printf("-- gc begin\n");
+  size_t before = vm.bytesAllocated;
+#endif
+
+  markRoots();
+  traceReferences();
+  tableRemoveWhite(&vm.strings);
+  sweep();
+
+  vm.nextGC = vm.bytesAllocated * GC_HEAP_GROW_FACTOR;
+
+#ifdef DEBUG_LOG_GC
+  printf("-- gc end\n");
+  printf("   collected %zu bytes (from %zu to %zu) next at %zu\n",
+         before - vm.bytesAllocated, before, vm.bytesAllocated, vm.nextGC);
+#endif
+}
+
 void freeObjects(void) {
   Obj *object = vm.objects;
   while (object != NULL) {
@@ -53,4 +209,6 @@ void freeObjects(void) {
     freeObject(object);
     object = next;
   }
+
+  free(vm.grayStack);
 }

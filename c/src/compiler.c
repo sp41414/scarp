@@ -6,6 +6,7 @@
 #include "scanner.h"
 #include "table.h"
 #include "value.h"
+#include "vm.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,27 +105,25 @@ static void parsePrecedence(Precedence precedence);
 
 static void growLocalsCapacity(Compiler *compiler) {
   if (compiler->localCapacity < compiler->localCount + 1) {
-    int oldCapacity = compiler->localCapacity;
-    compiler->localCapacity = GROW_CAPACITY(oldCapacity);
+    compiler->localCapacity = GROW_CAPACITY(compiler->localCapacity);
 
     if (compiler->localCapacity > UINT16_MAX)
       compiler->localCapacity = UINT16_MAX;
 
-    compiler->locals = GROW_ARRAY(Local, compiler->locals, oldCapacity,
-                                  compiler->localCapacity);
+    compiler->locals =
+        realloc(compiler->locals, sizeof(Local) * compiler->localCapacity);
   }
 }
 
 static void growUpvaluesCapacity(Compiler *compiler) {
   if (compiler->upvalueCapacity < compiler->function->upvalueCount + 1) {
-    int oldCapacity = compiler->upvalueCapacity;
-    compiler->upvalueCapacity = GROW_CAPACITY(oldCapacity);
+    compiler->upvalueCapacity = GROW_CAPACITY(compiler->upvalueCapacity);
 
     if (compiler->upvalueCapacity > UINT16_MAX)
       compiler->upvalueCapacity = UINT16_MAX;
 
-    compiler->upvalues = GROW_ARRAY(Upvalue, compiler->upvalues, oldCapacity,
-                                    compiler->upvalueCapacity);
+    compiler->upvalues = realloc(compiler->upvalues,
+                                 sizeof(Upvalue) * compiler->upvalueCapacity);
   }
 }
 
@@ -672,6 +671,7 @@ ParseRule rules[] = {
     [TOKEN_SELF] = {NULL, NULL, PREC_NONE},
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_LET] = {NULL, NULL, PREC_NONE},
+    [TOKEN_CONST] = {NULL, NULL, PREC_NONE},
     [TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
     [TOKEN_SWITCH] = {NULL, NULL, PREC_NONE},
     [TOKEN_BREAK] = {NULL, NULL, PREC_NONE},
@@ -714,6 +714,8 @@ static void parsePrecedence(Precedence precedence) {
 
 static int identifierConstant(Token *name) {
   Value string = OBJ_VAL(copyString(name->start, name->length));
+  push(string);
+
   Value idx;
   if (tableGet(&vm.globalNames, string, &idx)) {
     return (int)AS_NUMBER(idx);
@@ -723,6 +725,7 @@ static int identifierConstant(Token *name) {
   writeValueArray(&vm.globalValues, UNDEFINED_VAL);
 
   tableSet(&vm.globalNames, string, NUMBER_VAL((double)newIdx));
+  pop();
   return newIdx;
 }
 
@@ -928,10 +931,10 @@ static void forStatement(void) {
     patchJump(exitJump);
     emitByte(OP_POP);
   }
-  endScope();
   for (int i = 0; i < loop.breakCount; ++i) {
     patchJump(loop.breakJumps[i]);
   }
+  endScope();
   endLoop();
 }
 
@@ -1010,11 +1013,13 @@ static void switchStatement(void) {
       statement();
     }
   }
-  endScope();
 
   if (state == SWITCH_CASE) {
     closeCase(exitJumps, &exitCount, previousCaseSkip);
   }
+
+  endScope();
+
   for (int i = 0; i < exitCount; ++i) {
     patchJump(exitJumps[i]);
   }
@@ -1048,7 +1053,16 @@ static void emitLoopPops(void) {
   int localsToPop = 0;
   for (int i = current->localCount - 1; i >= 0; --i) {
     if (current->locals[i].depth > currentLoop->scopeDepth) {
-      localsToPop++;
+      if (current->locals[i].isCaptured) {
+        while (localsToPop > 0) {
+          uint8_t toPop = localsToPop > UINT8_MAX ? UINT8_MAX : localsToPop;
+          emitBytes(OP_POPN, toPop);
+          localsToPop -= toPop;
+        }
+        emitByte(OP_CLOSE_UPVALUE);
+      } else {
+        localsToPop++;
+      }
     } else {
       break;
     }
@@ -1227,4 +1241,12 @@ ObjFunction *compile(const char *source) {
 
   ObjFunction *function = endCompiler();
   return parser.hadError ? NULL : function;
+}
+
+void markCompilerRoots(void) {
+  Compiler *compiler = current;
+  while (compiler != NULL) {
+    markObject((Obj *)compiler->function);
+    compiler = compiler->enclosing;
+  }
 }
