@@ -36,11 +36,12 @@ void *reallocate(void *pointer, size_t oldSize, size_t newSize) {
 }
 
 static void freeObject(Obj *object) {
+  ObjType objectType = objType(object);
 #ifdef DEBUG_LOG_GC
-  printf("%p free type %d\n", (void *)object, object->type);
+  printf("%p free type %d\n", (void *)object, objectType);
 #endif
 
-  switch (object->type) {
+  switch (objectType) {
   case OBJ_CLOSURE: {
     ObjClosure *closure = (ObjClosure *)object;
     FREE_ARRAY(ObjUpvalue *, closure->upvalues, closure->upvalueCount);
@@ -70,13 +71,14 @@ static void freeObject(Obj *object) {
 }
 
 static void blackenObject(Obj *object) {
+  ObjType objectType = objType(object);
 #ifdef DEBUG_LOG_GC
   printf("%p blacken ", (void *)object);
   printValue(OBJ_VAL(object));
   printf("\n");
 #endif
 
-  switch (object->type) {
+  switch (objectType) {
   case OBJ_CLOSURE: {
     ObjClosure *closure = (ObjClosure *)object;
     markObject((Obj *)closure->function);
@@ -103,7 +105,7 @@ static void blackenObject(Obj *object) {
 void markObject(Obj *obj) {
   if (obj == NULL)
     return;
-  if (obj->isMarked)
+  if (isMarked(obj))
     return;
 #ifdef DEBUG_LOG_GC
   printf("%p mark ", (void *)obj);
@@ -111,9 +113,10 @@ void markObject(Obj *obj) {
   printf("\n");
 #endif
 
-  obj->isMarked = true;
+  setIsMarked(obj, true);
 
-  if (obj->type == OBJ_STRING || obj->type == OBJ_NATIVE)
+  ObjType objectType = objType(obj);
+  if (objectType == OBJ_STRING || objectType == OBJ_NATIVE)
     return;
 
   if (vm.grayCapacity < vm.grayCount + 1) {
@@ -163,16 +166,17 @@ static void sweep(void) {
   Obj *object = vm.objects;
 
   while (object != NULL) {
-    if (object->isMarked) {
-      object->isMarked = false;
+    Obj *next = objNext(object);
+    if (isMarked(object)) {
+      setIsMarked(object, false);
       prev = object;
-      object = object->next;
+      object = next;
     } else {
       Obj *unreached = object;
-      object = object->next;
+      object = next;
 
       if (prev != NULL) {
-        prev->next = object;
+        setObjNext(prev, object);
       } else {
         vm.objects = object;
       }
@@ -205,7 +209,7 @@ void collectGarbage(void) {
 void freeObjects(void) {
   Obj *object = vm.objects;
   while (object != NULL) {
-    Obj *next = object->next;
+    Obj *next = objNext(object);
     freeObject(object);
     object = next;
   }

@@ -27,7 +27,7 @@ static void resetStack(void) {
 }
 
 static inline ObjFunction *getFrameFunction(CallFrame *frame) {
-  if (frame->function->type == OBJ_FUNCTION) {
+  if (objType(frame->function) == OBJ_FUNCTION) {
     return (ObjFunction *)frame->function;
   } else {
     return ((ObjClosure *)frame->function)->function;
@@ -244,7 +244,7 @@ static bool checkArgCount(int argCount, int arity) {
 }
 
 static bool call(Obj *callee, uint8_t argCount) {
-  ObjFunction *function = callee->type == OBJ_FUNCTION
+  ObjFunction *function = objType(callee) == OBJ_FUNCTION
                               ? (ObjFunction *)callee
                               : ((ObjClosure *)callee)->function;
 
