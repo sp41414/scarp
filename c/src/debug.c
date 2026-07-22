@@ -150,6 +150,10 @@ int disassembleInstruction(Chunk *chunk, int offset) {
   switch (instruction) {
   case OP_RETURN:
     return simpleInstruction("OP_RETURN", offset);
+  case OP_CLASS:
+    return constantInstruction("OP_CLASS", chunk, offset);
+  case OP_CLASS_LONG:
+    return longConstantInstruction("OP_CLASS_LONG", chunk, offset);
   case OP_CONSTANT:
     return constantInstruction("OP_CONSTANT", chunk, offset);
   case OP_CONSTANT_LONG:
@@ -180,6 +184,14 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return longByteInstruction("OP_GET_UPVALUE_LONG", chunk, offset);
   case OP_SET_UPVALUE_LONG:
     return longByteInstruction("OP_SET_UPVALUE_LONG", chunk, offset);
+  case OP_GET_PROPERTY:
+    return constantInstruction("OP_GET_PROPERTY", chunk, offset);
+  case OP_SET_PROPERTY:
+    return constantInstruction("OP_SET_PROPERTY", chunk, offset);
+  case OP_GET_PROPERTY_LONG:
+    return longConstantInstruction("OP_GET_PROPERTY_LONG", chunk, offset);
+  case OP_SET_PROPERTY_LONG:
+    return longConstantInstruction("OP_SET_PROPERTY_LONG", chunk, offset);
   case OP_NIL:
     return simpleInstruction("OP_NIL", offset);
   case OP_TRUE:

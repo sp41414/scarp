@@ -75,7 +75,7 @@ typedef struct {
   bool isLocal;
 } Upvalue;
 
-typedef enum { TYPE_SCRIPT, TYPE_FUNCTION } FunctionType;
+typedef enum { TYPE_SCRIPT, TYPE_FUNCTION, TYPE_LAMBDA } FunctionType;
 
 typedef struct Compiler {
   struct Compiler *enclosing;
@@ -100,6 +100,7 @@ static void expression(void);
 static void statement(void);
 static void declaration(void);
 static void varDeclaration(bool isConst);
+static void function(FunctionType type);
 static ParseRule *getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
@@ -145,6 +146,8 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
   if (type == TYPE_FUNCTION) {
     current->function->name =
         copyString(parser.previous.start, parser.previous.length);
+  } else if (type == TYPE_LAMBDA) {
+    current->function->name = copyString("lambda", 6);
   }
 
   Local *local = &current->locals[current->localCount++];
@@ -480,6 +483,30 @@ static void call(bool canAssign) {
   emitBytes(OP_CALL, argCount);
 }
 
+static void dot(bool canAssign) {
+  consume(TOKEN_IDENTIFIER, "Expect property name after '.'");
+
+  ObjString *name = copyString(parser.previous.start, parser.previous.length);
+  push(OBJ_VAL(name));
+  int nameConstant = makeConstant(OBJ_VAL(name));
+  pop();
+
+  if (canAssign && match(TOKEN_EQUAL)) {
+    expression();
+    if (nameConstant <= UINT8_MAX) {
+      emitBytes(OP_SET_PROPERTY, nameConstant);
+    } else {
+      emitLongBytes(OP_SET_PROPERTY_LONG, nameConstant);
+    }
+  } else {
+    if (nameConstant <= UINT8_MAX) {
+      emitBytes(OP_GET_PROPERTY, nameConstant);
+    } else {
+      emitLongBytes(OP_GET_PROPERTY_LONG, nameConstant);
+    }
+  }
+}
+
 static void string(bool canAssign) {
   emitConstant(OBJ_VAL(
       copyString(parser.previous.start + 1, parser.previous.length - 2)));
@@ -624,13 +651,22 @@ static void or_or(bool canAssign) {
   patchJump(jump);
 }
 
+static void lambda(bool canAssign) {
+  if (!check(TOKEN_LEFT_PAREN)) {
+    errorAtCurrent("Expect '(' after 'fn' in lambda expression");
+    return;
+  }
+
+  function(TYPE_LAMBDA);
+}
+
 ParseRule rules[] = {
     [TOKEN_LEFT_PAREN] = {grouping, call, PREC_CALL},
     [TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
     [TOKEN_LEFT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_RIGHT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_COMMA] = {NULL, NULL, PREC_NONE},
-    [TOKEN_DOT] = {NULL, NULL, PREC_NONE},
+    [TOKEN_DOT] = {NULL, dot, PREC_CALL},
     [TOKEN_MINUS] = {unary, binary, PREC_TERM},
     [TOKEN_PLUS] = {NULL, binary, PREC_TERM},
     [TOKEN_SEMICOLON] = {NULL, NULL, PREC_NONE},
@@ -662,7 +698,7 @@ ParseRule rules[] = {
     [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
     [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
     [TOKEN_FOR] = {NULL, NULL, PREC_NONE},
-    [TOKEN_FUNCTION] = {NULL, NULL, PREC_NONE},
+    [TOKEN_FUNCTION] = {lambda, NULL, PREC_NONE},
     [TOKEN_IF] = {NULL, NULL, PREC_NONE},
     [TOKEN_NIL] = {literal, NULL, PREC_NONE},
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
@@ -718,6 +754,7 @@ static int identifierConstant(Token *name) {
 
   Value idx;
   if (tableGet(&vm.globalNames, string, &idx)) {
+    pop();
     return (int)AS_NUMBER(idx);
   }
 
@@ -1185,6 +1222,34 @@ static void fnDeclaration(void) {
   defineVariable(false, global);
 }
 
+static void classDeclaration(void) {
+  consume(TOKEN_IDENTIFIER, "Expect class name");
+  Token name = parser.previous;
+
+  int nameSymbol = 0;
+  if (current->scopeDepth > 0) {
+    declareVariable(false);
+  } else {
+    nameSymbol = identifierConstant(&name);
+  }
+
+  ObjString *className = copyString(name.start, name.length);
+  push(OBJ_VAL(className));
+  int nameConstant = makeConstant(OBJ_VAL(className));
+  pop();
+
+  if (nameConstant <= UINT8_MAX) {
+    emitBytes(OP_CLASS, (uint8_t)nameConstant);
+  } else {
+    emitLongBytes(OP_CLASS_LONG, nameConstant);
+  }
+
+  defineVariable(false, nameSymbol);
+
+  consume(TOKEN_LEFT_BRACE, "Expect '{' before class body");
+  consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body");
+}
+
 static void statement(void) {
   if (match(TOKEN_PRINT)) {
     printStatement();
@@ -1212,7 +1277,9 @@ static void statement(void) {
 }
 
 static void declaration(void) {
-  if (match(TOKEN_FUNCTION)) {
+  if (match(TOKEN_CLASS)) {
+    classDeclaration();
+  } else if (match(TOKEN_FUNCTION)) {
     fnDeclaration();
   } else if (match(TOKEN_LET)) {
     varDeclaration(false);

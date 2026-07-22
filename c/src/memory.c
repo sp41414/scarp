@@ -2,6 +2,7 @@
 #include "chunk.h"
 #include "compiler.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 #include "vm.h"
 #include <stdlib.h>
@@ -13,7 +14,7 @@
 #define GC_HEAP_GROW_FACTOR 2
 
 void *reallocate(void *pointer, size_t oldSize, size_t newSize) {
-  vm.bytesAllocated += newSize - oldSize;
+  vm.bytesAllocated += (uintptr_t)newSize - (uintptr_t)oldSize;
   if (newSize > oldSize) {
 #ifdef DEBUG_STRESS_GC
     collectGarbage();
@@ -42,6 +43,10 @@ static void freeObject(Obj *object) {
 #endif
 
   switch (objectType) {
+  case OBJ_CLASS: {
+    FREE(ObjClass, object);
+    break;
+  }
   case OBJ_CLOSURE: {
     ObjClosure *closure = (ObjClosure *)object;
     FREE_ARRAY(ObjUpvalue *, closure->upvalues, closure->upvalueCount);
@@ -56,6 +61,12 @@ static void freeObject(Obj *object) {
     ObjFunction *function = (ObjFunction *)object;
     freeChunk(&function->chunk);
     FREE(ObjFunction, object);
+    break;
+  }
+  case OBJ_INSTANCE: {
+    ObjInstance *instance = (ObjInstance *)object;
+    freeTable(&instance->fields);
+    FREE(ObjInstance, instance);
     break;
   }
   case OBJ_STRING: {
@@ -79,6 +90,11 @@ static void blackenObject(Obj *object) {
 #endif
 
   switch (objectType) {
+  case OBJ_CLASS: {
+    ObjClass *cls = (ObjClass *)object;
+    markObject((Obj *)cls->name);
+    break;
+  }
   case OBJ_CLOSURE: {
     ObjClosure *closure = (ObjClosure *)object;
     markObject((Obj *)closure->function);
@@ -91,6 +107,12 @@ static void blackenObject(Obj *object) {
     ObjFunction *function = (ObjFunction *)object;
     markObject((Obj *)function->name);
     markArray(&function->chunk.constants);
+    break;
+  }
+  case OBJ_INSTANCE: {
+    ObjInstance *instance = (ObjInstance *)object;
+    markObject((Obj *)instance->cls);
+    markTable(&instance->fields);
     break;
   }
   case OBJ_UPVALUE:

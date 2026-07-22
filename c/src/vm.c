@@ -20,6 +20,17 @@ static Value clockNative(int argCount, Value *args) {
   return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
 }
 
+static Value hasFieldNative(int argCount, Value *args) {
+  if (argCount != 2)
+    return BOOL_VAL(false);
+  if (!IS_INSTANCE(args[0]) || !IS_STRING(args[1]))
+    return BOOL_VAL(false);
+
+  ObjInstance *instance = AS_INSTANCE(args[0]);
+  Value value;
+  return BOOL_VAL(tableGet(&instance->fields, args[1], &value));
+}
+
 static void resetStack(void) {
   vm.openUpvalues = NULL;
   vm.stackTop = vm.stack;
@@ -109,6 +120,7 @@ void initVM(void) {
   vm.grayStack = NULL;
 
   defineNative("clock", clockNative, 0);
+  defineNative("hasField", hasFieldNative, 2);
 }
 
 void freeVM(void) {
@@ -267,6 +279,11 @@ static bool call(Obj *callee, uint8_t argCount) {
 static bool callValue(Value callee, uint8_t argCount) {
   if (IS_OBJ(callee)) {
     switch (OBJ_TYPE(callee)) {
+    case OBJ_CLASS: {
+      ObjClass *cls = AS_CLASS(callee);
+      vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(cls));
+      return true;
+    }
     case OBJ_FUNCTION:
     case OBJ_CLOSURE:
       return call(AS_OBJ(callee), argCount);
@@ -360,6 +377,8 @@ static InterpretResult run(void) {
 #define READ_CONSTANT() (frameFunction->chunk.constants.values[READ_BYTE()])
 #define READ_CONSTANT_LONG()                                                   \
   (frameFunction->chunk.constants.values[READ_LONG()])
+#define READ_STRING() (AS_STRING(READ_CONSTANT()))
+#define READ_STRING_LONG() (AS_STRING(READ_CONSTANT_LONG()))
 #define BINARY_OP(valueType, op)                                               \
   do {                                                                         \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) {                          \
@@ -552,6 +571,64 @@ static InterpretResult run(void) {
       *((ObjClosure *)frame->function)->upvalues[slot]->location = peek(0);
       break;
     }
+#define CHECK_INSTANCE(idx)                                                    \
+  if (!IS_INSTANCE(peek(idx))) {                                               \
+    runtimeError("Only instances have properties.");                           \
+    return INTERPRET_RUNTIME_ERROR;                                            \
+  }
+    case OP_GET_PROPERTY: {
+      CHECK_INSTANCE(0);
+
+      ObjInstance *instance = AS_INSTANCE(peek(0));
+      Value name = READ_CONSTANT();
+
+      Value value;
+      if (tableGet(&instance->fields, name, &value)) {
+        pop();
+        push(value);
+        break;
+      }
+
+      push(NIL_VAL);
+      break;
+    }
+    case OP_SET_PROPERTY: {
+      CHECK_INSTANCE(1);
+
+      ObjInstance *instance = AS_INSTANCE(peek(1));
+      tableSet(&instance->fields, READ_CONSTANT(), peek(0));
+      Value value = pop();
+      pop();
+      push(value);
+      break;
+    }
+    case OP_GET_PROPERTY_LONG: {
+      CHECK_INSTANCE(0);
+
+      ObjInstance *instance = AS_INSTANCE(peek(0));
+      Value name = READ_CONSTANT_LONG();
+
+      Value value;
+      if (tableGet(&instance->fields, name, &value)) {
+        pop();
+        push(value);
+        break;
+      }
+
+      push(NIL_VAL);
+      break;
+    }
+    case OP_SET_PROPERTY_LONG: {
+      CHECK_INSTANCE(1);
+
+      ObjInstance *instance = AS_INSTANCE(peek(1));
+      tableSet(&instance->fields, READ_CONSTANT_LONG(), peek(0));
+      Value value = pop();
+      pop();
+      push(value);
+      break;
+    }
+#undef CHECK_INSTANCE
     case OP_EQUAL: {
       Value b = pop();
       Value a = pop();
@@ -737,6 +814,12 @@ static InterpretResult run(void) {
       ip = frame->ip;
       break;
     }
+    case OP_CLASS:
+      push(OBJ_VAL(newClass(READ_STRING())));
+      break;
+    case OP_CLASS_LONG:
+      push(OBJ_VAL(newClass(READ_STRING_LONG())));
+      break;
     }
   }
 
@@ -745,6 +828,8 @@ static InterpretResult run(void) {
 #undef READ_LONG
 #undef READ_CONSTANT
 #undef READ_CONSTANT_LONG
+#undef READ_STRING
+#undef READ_STRING_LONG
 #undef BINARY_OP
 #undef BINARY_BITWISE_OP
 }
