@@ -53,6 +53,7 @@ void initVM(void);
 void freeVM(void);
 InterpretResult interpret(const char *source);
 void push(Value value);
+void growFlagCapacity(int idx);
 Value pop(void);
 
 #endif

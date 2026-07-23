@@ -147,7 +147,7 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
     current->function->name =
         copyString(parser.previous.start, parser.previous.length);
   } else if (type == TYPE_LAMBDA) {
-    current->function->name = copyString("lambda", 6);
+    current->function->name = COPY_LITERAL("lambda");
   }
 
   Local *local = &current->locals[current->localCount++];

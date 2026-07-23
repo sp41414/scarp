@@ -10,6 +10,8 @@
 #define OBJ_MARKED_MASK 0x8000000000000000ULL
 #define OBJ_PTR_MASK 0x7FFFFFFFFFFFFFF8ULL
 
+#define COPY_LITERAL(str) copyString(str, sizeof(str) - 1)
+
 #define OBJ_TYPE(value) (objType(AS_OBJ(value)))
 
 #define IS_CLASS(value) isObjType(value, OBJ_CLASS)
@@ -53,7 +55,7 @@ typedef struct {
   ObjString *name;
 } ObjFunction;
 
-typedef Value (*NativeFn)(int argCount, Value *args);
+typedef bool (*NativeFn)(Value *args);
 
 typedef struct {
   Obj obj;

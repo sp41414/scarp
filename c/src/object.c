@@ -3,6 +3,7 @@
 #include "table.h"
 #include "value.h"
 #include "vm.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 

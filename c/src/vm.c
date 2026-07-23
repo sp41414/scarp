@@ -4,6 +4,7 @@
 #include "compiler.h"
 #include "debug.h"
 #include "memory.h"
+#include "native.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"
@@ -12,24 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 VM vm;
-
-static Value clockNative(int argCount, Value *args) {
-  return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
-}
-
-static Value hasFieldNative(int argCount, Value *args) {
-  if (argCount != 2)
-    return BOOL_VAL(false);
-  if (!IS_INSTANCE(args[0]) || !IS_STRING(args[1]))
-    return BOOL_VAL(false);
-
-  ObjInstance *instance = AS_INSTANCE(args[0]);
-  Value value;
-  return BOOL_VAL(tableGet(&instance->fields, args[1], &value));
-}
 
 static void resetStack(void) {
   vm.openUpvalues = NULL;
@@ -73,7 +58,7 @@ static void runtimeError(const char *fmt, ...) {
   resetStack();
 }
 
-static void growFlagCapacity(int idx) {
+void growFlagCapacity(int idx) {
   if (idx < vm.globalFlagCapacity)
     return;
 
@@ -87,18 +72,6 @@ static void growFlagCapacity(int idx) {
   for (int i = oldCapacity; i < vm.globalFlagCapacity; ++i) {
     vm.globalIsConst[i] = false;
   }
-}
-
-static void defineNative(const char *name, NativeFn function, int arity) {
-  push(OBJ_VAL(copyString(name, (int)strlen(name))));
-  push(OBJ_VAL(newNative(function, arity)));
-
-  int idx = vm.globalValues.count;
-  growFlagCapacity(idx + 1);
-  writeValueArray(&vm.globalValues, vm.stack[1]);
-  tableSet(&vm.globalNames, vm.stack[0], NUMBER_VAL((double)idx));
-
-  vm.stackTop -= 2;
 }
 
 void initVM(void) {
@@ -119,8 +92,7 @@ void initVM(void) {
   vm.grayCapacity = 0;
   vm.grayStack = NULL;
 
-  defineNative("clock", clockNative, 0);
-  defineNative("hasField", hasFieldNative, 2);
+  defineNativeFns();
 }
 
 void freeVM(void) {
@@ -183,10 +155,10 @@ static inline bool isFalsey(Value value) {
 
 static ObjString *stringify(Value value) {
   if (IS_NIL(value)) {
-    return copyString("nil", 3);
+    return COPY_LITERAL("nil");
   }
   if (IS_BOOL(value)) {
-    return AS_BOOL(value) ? copyString("true", 4) : copyString("false", 5);
+    return AS_BOOL(value) ? COPY_LITERAL("true") : COPY_LITERAL("false");
   }
   if (IS_NUMBER(value)) {
     double num = AS_NUMBER(value);
@@ -290,13 +262,17 @@ static bool callValue(Value callee, uint8_t argCount) {
     case OBJ_NATIVE: {
       ObjNative *native = AS_NATIVE(callee);
       if (!checkArgCount(argCount, native->arity)) {
+        runtimeError("Expect %d arguments, got %d", native->arity, argCount);
         return false;
       }
 
-      Value result = native->function(argCount, vm.stackTop - argCount);
-      vm.stackTop -= argCount + 1;
-      push(result);
-      return true;
+      if (native->function(vm.stackTop - argCount)) {
+        vm.stackTop -= argCount;
+        return true;
+      } else {
+        runtimeError(AS_CSTRING(vm.stackTop[-argCount - 1]));
+        return false;
+      }
     }
     default:
       break;
