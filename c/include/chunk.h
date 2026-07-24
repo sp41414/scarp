@@ -3,6 +3,8 @@
 
 #include "value.h"
 
+// _LONG variants must be ordered exactly + 1
+// after their non-_LONG variants.
 typedef enum {
   OP_CONSTANT,
   OP_CONSTANT_LONG,
@@ -25,12 +27,12 @@ typedef enum {
   OP_SET_GLOBAL,
   OP_SET_GLOBAL_LONG,
   OP_GET_UPVALUE,
-  OP_SET_UPVALUE,
   OP_GET_UPVALUE_LONG,
+  OP_SET_UPVALUE,
   OP_SET_UPVALUE_LONG,
   OP_GET_PROPERTY,
-  OP_SET_PROPERTY,
   OP_GET_PROPERTY_LONG,
+  OP_SET_PROPERTY,
   OP_SET_PROPERTY_LONG,
   OP_EQUAL,
   OP_GREATER,
@@ -53,12 +55,16 @@ typedef enum {
   OP_JUMP_IF_FALSE,
   OP_LOOP,
   OP_CALL,
+  OP_INVOKE,
+  OP_INVOKE_LONG,
   OP_CLOSURE,
   OP_CLOSURE_LONG,
   OP_CLOSE_UPVALUE,
   OP_RETURN,
   OP_CLASS,
   OP_CLASS_LONG,
+  OP_METHOD,
+  OP_METHOD_LONG,
 } OpCode;
 
 typedef struct {

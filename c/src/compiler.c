@@ -75,7 +75,13 @@ typedef struct {
   bool isLocal;
 } Upvalue;
 
-typedef enum { TYPE_SCRIPT, TYPE_FUNCTION, TYPE_LAMBDA } FunctionType;
+typedef enum {
+  TYPE_SCRIPT,
+  TYPE_FUNCTION,
+  TYPE_INITIALIZER,
+  TYPE_METHOD,
+  TYPE_LAMBDA
+} FunctionType;
 
 typedef struct Compiler {
   struct Compiler *enclosing;
@@ -89,13 +95,18 @@ typedef struct Compiler {
   int scopeDepth;
 } Compiler;
 
+typedef struct ClassCompiler {
+  struct ClassCompiler *enclosing;
+} ClassCompiler;
+
 Parser parser;
 Compiler *current = NULL;
-Loop *currentLoop;
+ClassCompiler *currentClass = NULL;
+Loop *currentLoop = NULL;
 
 static bool match(TokenType type);
 static bool check(TokenType type);
-static int identifierConstant(Token *name);
+static int globalIdentifierConstant(Token *name);
 static void expression(void);
 static void statement(void);
 static void declaration(void);
@@ -143,7 +154,8 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
   growUpvaluesCapacity(compiler);
   current = compiler;
 
-  if (type == TYPE_FUNCTION) {
+  if (type == TYPE_FUNCTION || type == TYPE_METHOD ||
+      type == TYPE_INITIALIZER) {
     current->function->name =
         copyString(parser.previous.start, parser.previous.length);
   } else if (type == TYPE_LAMBDA) {
@@ -152,8 +164,13 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
 
   Local *local = &current->locals[current->localCount++];
   local->depth = 0;
-  local->name.start = "";
-  local->name.length = 0;
+  if (type == TYPE_METHOD || type == TYPE_INITIALIZER) {
+    local->name.start = "self";
+    local->name.length = 4;
+  } else {
+    local->name.start = "";
+    local->name.length = 0;
+  }
   local->isCaptured = false;
 }
 
@@ -263,7 +280,15 @@ static void emitLoop(int loopStart) {
   emitBytes(offset & 0xff, (offset >> 8) & 0xff);
 }
 
-static void emitReturn(void) { emitBytes(OP_NIL, OP_RETURN); }
+static void emitReturn(void) {
+  if (current->type == TYPE_INITIALIZER) {
+    emitBytes(OP_GET_LOCAL, 0);
+  } else {
+    emitByte(OP_NIL);
+  }
+
+  emitByte(OP_RETURN);
+}
 
 static int makeConstant(Value value) {
   int constant = addConstant(currentChunk(), value);
@@ -273,21 +298,12 @@ static int makeConstant(Value value) {
   return constant;
 }
 
-static void emitConstant(Value value) {
+static void emitConstant(OpCode code, Value value) {
   int constant = makeConstant(value);
   if (constant <= UINT8_MAX) {
-    emitBytes(OP_CONSTANT, (uint8_t)constant);
+    emitBytes(code, (uint8_t)constant);
   } else {
-    emitLongBytes(OP_CONSTANT_LONG, constant);
-  }
-}
-
-static void emitClosure(Value closure) {
-  int constant = makeConstant(closure);
-  if (constant <= UINT8_MAX) {
-    emitBytes(OP_CLOSURE, (uint8_t)constant);
-  } else {
-    emitLongBytes(OP_CLOSURE_LONG, constant);
+    emitLongBytes(code + 1, constant);
   }
 }
 
@@ -346,7 +362,7 @@ static void endScope(void) {
 
 static void number(bool canAssign) {
   double value = strtod(parser.previous.start, NULL);
-  emitConstant(NUMBER_VAL(value));
+  emitConstant(OP_CONSTANT, NUMBER_VAL(value));
 }
 
 static void grouping(bool canAssign) {
@@ -488,28 +504,23 @@ static void dot(bool canAssign) {
 
   ObjString *name = copyString(parser.previous.start, parser.previous.length);
   push(OBJ_VAL(name));
-  int nameConstant = makeConstant(OBJ_VAL(name));
-  pop();
 
   if (canAssign && match(TOKEN_EQUAL)) {
     expression();
-    if (nameConstant <= UINT8_MAX) {
-      emitBytes(OP_SET_PROPERTY, nameConstant);
-    } else {
-      emitLongBytes(OP_SET_PROPERTY_LONG, nameConstant);
-    }
+    emitConstant(OP_SET_PROPERTY, OBJ_VAL(name));
+  } else if (match(TOKEN_LEFT_PAREN)) {
+    uint8_t argCount = argumentList();
+    emitConstant(OP_INVOKE, OBJ_VAL(name));
+    emitByte(argCount);
   } else {
-    if (nameConstant <= UINT8_MAX) {
-      emitBytes(OP_GET_PROPERTY, nameConstant);
-    } else {
-      emitLongBytes(OP_GET_PROPERTY_LONG, nameConstant);
-    }
+    emitConstant(OP_GET_PROPERTY, OBJ_VAL(name));
   }
+  pop();
 }
 
 static void string(bool canAssign) {
-  emitConstant(OBJ_VAL(
-      copyString(parser.previous.start + 1, parser.previous.length - 2)));
+  emitConstant(OP_CONSTANT, OBJ_VAL(copyString(parser.previous.start + 1,
+                                               parser.previous.length - 2)));
 }
 
 static bool identifiersEqual(Token *id1, Token *id2) {
@@ -595,7 +606,7 @@ static void namedVariable(Token name, bool canAssign) {
       setOp = OP_SET_UPVALUE_LONG;
     }
   } else {
-    arg = identifierConstant(&name);
+    arg = globalIdentifierConstant(&name);
     if (arg <= UINT8_MAX) {
       getOp = OP_GET_GLOBAL;
       setOp = OP_SET_GLOBAL;
@@ -660,6 +671,15 @@ static void lambda(bool canAssign) {
   function(TYPE_LAMBDA);
 }
 
+static void self(bool canAssign) {
+  if (currentClass == NULL) {
+    error("Cannot use 'self' outside of a class");
+    return;
+  }
+
+  variable(false);
+}
+
 ParseRule rules[] = {
     [TOKEN_LEFT_PAREN] = {grouping, call, PREC_CALL},
     [TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
@@ -704,7 +724,7 @@ ParseRule rules[] = {
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
     [TOKEN_BASE] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SELF] = {NULL, NULL, PREC_NONE},
+    [TOKEN_SELF] = {self, NULL, PREC_NONE},
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_LET] = {NULL, NULL, PREC_NONE},
     [TOKEN_CONST] = {NULL, NULL, PREC_NONE},
@@ -748,7 +768,7 @@ static void parsePrecedence(Precedence precedence) {
   }
 }
 
-static int identifierConstant(Token *name) {
+static int globalIdentifierConstant(Token *name) {
   Value string = OBJ_VAL(copyString(name->start, name->length));
   push(string);
 
@@ -808,7 +828,7 @@ static int parseVariable(bool isConst, const char *message) {
   if (current->scopeDepth > 0)
     return 0;
 
-  return identifierConstant(&parser.previous);
+  return globalIdentifierConstant(&parser.previous);
 }
 
 static void markInitialized(void) {
@@ -1140,6 +1160,9 @@ static void returnStatement(void) {
   if (match(TOKEN_SEMICOLON)) {
     emitReturn();
   } else {
+    if (current->type == TYPE_INITIALIZER) {
+      error("Can't return a value from an initializer");
+    }
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after return");
     emitByte(OP_RETURN);
@@ -1204,14 +1227,14 @@ static void function(FunctionType type) {
   ObjFunction *function = endCompiler();
 
   if (function->upvalueCount > 0) {
-    emitClosure(OBJ_VAL(function));
+    emitConstant(OP_CLOSURE, OBJ_VAL(function));
 
     for (int i = 0; i < upvalueCount; ++i) {
       Upvalue upvalue = tempUpvalues[i];
       emitShortBytes(upvalue.isLocal ? 1 : 0, upvalue.index);
     }
   } else {
-    emitConstant(OBJ_VAL(function));
+    emitConstant(OP_CONSTANT, OBJ_VAL(function));
   }
 }
 
@@ -1222,6 +1245,24 @@ static void fnDeclaration(void) {
   defineVariable(false, global);
 }
 
+static void method(void) {
+  consume(TOKEN_IDENTIFIER, "Expect method name");
+  Value name =
+      OBJ_VAL(copyString(parser.previous.start, parser.previous.length));
+  push(name);
+
+  FunctionType type = TYPE_METHOD;
+  if (parser.previous.length == 4 &&
+      memcmp(parser.previous.start, "init", 4) == 0) {
+    type = TYPE_INITIALIZER;
+  }
+  function(type);
+
+  emitConstant(OP_METHOD, name);
+
+  pop();
+}
+
 static void classDeclaration(void) {
   consume(TOKEN_IDENTIFIER, "Expect class name");
   Token name = parser.previous;
@@ -1230,24 +1271,29 @@ static void classDeclaration(void) {
   if (current->scopeDepth > 0) {
     declareVariable(false);
   } else {
-    nameSymbol = identifierConstant(&name);
+    nameSymbol = globalIdentifierConstant(&name);
   }
 
-  ObjString *className = copyString(name.start, name.length);
-  push(OBJ_VAL(className));
-  int nameConstant = makeConstant(OBJ_VAL(className));
+  Value nameConstant = OBJ_VAL(copyString(name.start, name.length));
+  push(nameConstant);
+  emitConstant(OP_CLASS, nameConstant);
   pop();
-
-  if (nameConstant <= UINT8_MAX) {
-    emitBytes(OP_CLASS, (uint8_t)nameConstant);
-  } else {
-    emitLongBytes(OP_CLASS_LONG, nameConstant);
-  }
 
   defineVariable(false, nameSymbol);
 
+  ClassCompiler classCompiler;
+  classCompiler.enclosing = currentClass;
+  currentClass = &classCompiler;
+
+  namedVariable(name, false);
   consume(TOKEN_LEFT_BRACE, "Expect '{' before class body");
+  while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    method();
+  }
   consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body");
+  emitByte(OP_POP);
+
+  currentClass = currentClass->enclosing;
 }
 
 static void statement(void) {

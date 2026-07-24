@@ -135,6 +135,24 @@ static int longClosureInstruction(Chunk *chunk, int offset) {
   return offset;
 }
 
+static int invokeInstruction(const char *name, Chunk *chunk, int offset) {
+  uint8_t constant = GET_INDEX(chunk, offset);
+  uint8_t argCount = chunk->code[offset + 2];
+  printf("%-16s (%d args) %4d '", name, argCount, constant);
+  printValue(chunk->constants.values[constant]);
+  printf("'\n");
+  return offset + 3;
+}
+
+static int longInvokeInstruction(const char *name, Chunk *chunk, int offset) {
+  int constant = GET_LONG_INDEX(chunk, offset);
+  uint8_t argCount = chunk->code[offset + 4];
+  printf("%-16s (%d args) %4d '", name, argCount, constant);
+  printValue(chunk->constants.values[constant]);
+  printf("'\n");
+  return offset + 5;
+}
+
 int disassembleInstruction(Chunk *chunk, int offset) {
   printf("%04d ", offset);
 
@@ -228,6 +246,10 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return jumpInstruction("OP_LOOP", -1, chunk, offset);
   case OP_CALL:
     return byteInstruction("OP_CALL", chunk, offset);
+  case OP_INVOKE:
+    return invokeInstruction("OP_INVOKE", chunk, offset);
+  case OP_INVOKE_LONG:
+    return longInvokeInstruction("OP_INVOKE_LONG", chunk, offset);
   case OP_CLOSURE:
     return closureInstruction(chunk, offset);
   case OP_CLOSURE_LONG:
@@ -258,6 +280,10 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return simpleInstruction("OP_BIN_SHIFT_RIGHT_UNSIGNED", offset);
   case OP_BIN_SHIFT_LEFT:
     return simpleInstruction("OP_BIN_SHIFT_LEFT", offset);
+  case OP_METHOD:
+    return constantInstruction("OP_METHOD", chunk, offset);
+  case OP_METHOD_LONG:
+    return longConstantInstruction("OP_METHOD_LONG", chunk, offset);
   default:
     printf("Unknown opcode %d\n", instruction);
     return offset + 1;

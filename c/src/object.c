@@ -24,6 +24,13 @@ static Obj *allocateObject(size_t size, ObjType type) {
   return object;
 }
 
+ObjBoundMethod *newBoundMethod(Value receiver, Obj *method) {
+  ObjBoundMethod *bound = ALLOCATE_OBJ(ObjBoundMethod, OBJ_BOUND_METHOD);
+  bound->receiver = receiver;
+  bound->method = method;
+  return bound;
+}
+
 ObjInstance *newInstance(ObjClass *cls) {
   ObjInstance *instance = ALLOCATE_OBJ(ObjInstance, OBJ_INSTANCE);
   instance->cls = cls;
@@ -34,6 +41,8 @@ ObjInstance *newInstance(ObjClass *cls) {
 ObjClass *newClass(ObjString *name) {
   ObjClass *cls = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
   cls->name = name;
+  cls->initializer = NULL;
+  initTable(&cls->methods);
   return cls;
 }
 
@@ -109,27 +118,31 @@ ObjUpvalue *newUpvalue(Value *slot) {
   return upvalue;
 }
 
-static void printFunction(ObjFunction *function) {
-  if (function->name == NULL) {
+static void printFunction(Obj *function) {
+  ObjFunction *fn = objType(function) == OBJ_FUNCTION
+                        ? (ObjFunction *)function
+                        : ((ObjClosure *)function)->function;
+  if (fn->name == NULL) {
     printf("<script>");
     return;
   }
-  printf("<fn %s>", function->name->chars);
+  printf("<fn %s>", fn->name->chars);
 }
 
 void printObject(Value value) {
   switch (OBJ_TYPE(value)) {
+  case OBJ_BOUND_METHOD:
+    printFunction(AS_BOUND_METHOD(value)->method);
+    break;
   case OBJ_CLASS:
     printf("<class %s>", AS_CLASS(value)->name->chars);
-    break;
-  case OBJ_CLOSURE:
-    printFunction(AS_CLOSURE(value)->function);
     break;
   case OBJ_NATIVE:
     printf("<native fn>");
     break;
+  case OBJ_CLOSURE:
   case OBJ_FUNCTION:
-    printFunction(AS_FUNCTION(value));
+    printFunction(AS_OBJ(value));
     break;
   case OBJ_INSTANCE:
     printf("<%s instance>", AS_INSTANCE(value)->cls->name->chars);
