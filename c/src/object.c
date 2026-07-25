@@ -43,6 +43,7 @@ ObjClass *newClass(ObjString *name) {
   cls->name = name;
   cls->initializer = NULL;
   initTable(&cls->methods);
+  initTable(&cls->staticMethods);
   return cls;
 }
 

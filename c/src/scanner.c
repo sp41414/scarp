@@ -237,6 +237,8 @@ static TokenType identifierType(void) {
       return checkKeyword(2, 2, "lf", TOKEN_SELF);
     case 'w':
       return checkKeyword(2, 4, "itch", TOKEN_SWITCH);
+    case 't':
+      return checkKeyword(2, 4, "atic", TOKEN_STATIC);
     }
     break;
   case 't':

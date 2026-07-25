@@ -338,6 +338,15 @@ static void defineMethod(Value name) {
   pop();
 }
 
+static void defineStaticMethod(Value name) {
+  Value method = peek(0);
+  ObjClass *cls = AS_CLASS(peek(1));
+  tableSet(&cls->staticMethods, name, method);
+  if (AS_STRING(name) == vm.initString)
+    runtimeError("Cannot define initializer method as static");
+  pop();
+}
+
 static bool bindMethod(ObjClass *cls, Value name) {
   Value method;
   if (!tableGet(&cls->methods, name, &method)) {
@@ -362,10 +371,24 @@ static bool invokeFromClass(ObjClass *cls, Value name, int argCount) {
 
 static bool invoke(Value name, int argCount) {
   Value receiver = peek(argCount);
-  if (!IS_INSTANCE(receiver)) {
-    runtimeError("Only instances have methods");
+  if (IS_CLASS(receiver)) {
+    ObjClass *cls = AS_CLASS(receiver);
+
+    Value staticMethod;
+    if (tableGet(&cls->staticMethods, name, &staticMethod)) {
+      vm.stackTop[-argCount - 1] = staticMethod;
+      return call(AS_OBJ(staticMethod), argCount);
+    }
+
+    runtimeError("Undefined static method '%s'", AS_CSTRING(name));
     return false;
   }
+
+  if (!IS_INSTANCE(receiver)) {
+    runtimeError("Only instances and classes have methods");
+    return false;
+  }
+
   ObjInstance *instance = AS_INSTANCE(receiver);
 
   Value value;
@@ -401,6 +424,17 @@ static int32_t toInt32(double d) {
     modded += UINT32_MAX + 1.0;
   uint32_t u = (uint32_t)modded;
   return (int32_t)u;
+}
+
+static bool getStaticMethod(ObjClass *cls, Value name) {
+  Value staticMethod;
+  if (!tableGet(&cls->staticMethods, name, &staticMethod)) {
+    runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+    return false;
+  }
+  pop();
+  push(staticMethod);
+  return true;
 }
 
 static InterpretResult run(void) {
@@ -626,34 +660,41 @@ static InterpretResult run(void) {
       *((ObjClosure *)frame->function)->upvalues[slot]->location = peek(0);
       break;
     }
-
-#define CHECK_INSTANCE(idx)                                                    \
-  if (!IS_INSTANCE(peek(idx))) {                                               \
-    runtimeError("Only instances have properties.");                           \
-    return INTERPRET_RUNTIME_ERROR;                                            \
-  }
-
     case OP_GET_PROPERTY: {
-      CHECK_INSTANCE(0);
+      if (IS_CLASS(peek(0))) {
+        ObjClass *cls = AS_CLASS(peek(0));
+        Value name = READ_CONSTANT();
 
-      ObjInstance *instance = AS_INSTANCE(peek(0));
-      Value name = READ_CONSTANT();
-
-      Value value;
-      if (tableGet(&instance->fields, name, &value)) {
-        pop();
-        push(value);
+        if (!getStaticMethod(cls, name)) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
         break;
-      }
+      } else if (IS_INSTANCE(peek(0))) {
+        ObjInstance *instance = AS_INSTANCE(peek(0));
+        Value name = READ_CONSTANT();
 
-      if (!bindMethod(instance->cls, name)) {
+        Value value;
+        if (tableGet(&instance->fields, name, &value)) {
+          pop();
+          push(value);
+          break;
+        }
+
+        if (!bindMethod(instance->cls, name)) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
+      } else {
+        runtimeError("Only instances and classes have gettable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
+
       break;
     }
     case OP_SET_PROPERTY: {
-      CHECK_INSTANCE(1);
-
+      if (!IS_INSTANCE(peek(1))) {
+        runtimeError("Only instances have settable properties");
+        return INTERPRET_RUNTIME_ERROR;
+      }
       ObjInstance *instance = AS_INSTANCE(peek(1));
       tableSet(&instance->fields, READ_CONSTANT(), peek(0));
       Value value = pop();
@@ -662,26 +703,39 @@ static InterpretResult run(void) {
       break;
     }
     case OP_GET_PROPERTY_LONG: {
-      CHECK_INSTANCE(0);
+      if (IS_CLASS(peek(0))) {
+        ObjClass *cls = AS_CLASS(peek(0));
+        Value name = READ_CONSTANT_LONG();
 
-      ObjInstance *instance = AS_INSTANCE(peek(0));
-      Value name = READ_CONSTANT_LONG();
-
-      Value value;
-      if (tableGet(&instance->fields, name, &value)) {
-        pop();
-        push(value);
+        if (!getStaticMethod(cls, name)) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
         break;
-      }
+      } else if (IS_INSTANCE(peek(0))) {
+        ObjInstance *instance = AS_INSTANCE(peek(0));
+        Value name = READ_CONSTANT_LONG();
 
-      if (!bindMethod(instance->cls, name)) {
+        Value value;
+        if (tableGet(&instance->fields, name, &value)) {
+          pop();
+          push(value);
+          break;
+        }
+
+        if (!bindMethod(instance->cls, name)) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
+      } else {
+        runtimeError("Only instances and classes have gettable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
       break;
     }
     case OP_SET_PROPERTY_LONG: {
-      CHECK_INSTANCE(1);
-
+      if (!IS_INSTANCE(peek(1))) {
+        runtimeError("Only instances have settable properties");
+        return INTERPRET_RUNTIME_ERROR;
+      }
       ObjInstance *instance = AS_INSTANCE(peek(1));
       tableSet(&instance->fields, READ_CONSTANT_LONG(), peek(0));
       Value value = pop();
@@ -689,7 +743,6 @@ static InterpretResult run(void) {
       push(value);
       break;
     }
-#undef CHECK_INSTANCE
     case OP_EQUAL: {
       Value b = pop();
       Value a = pop();
@@ -951,6 +1004,12 @@ static InterpretResult run(void) {
       break;
     case OP_METHOD_LONG:
       defineMethod(READ_CONSTANT_LONG());
+      break;
+    case OP_METHOD_STATIC:
+      defineStaticMethod(READ_CONSTANT());
+      break;
+    case OP_METHOD_STATIC_LONG:
+      defineStaticMethod(READ_CONSTANT_LONG());
       break;
     }
   }

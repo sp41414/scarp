@@ -60,8 +60,8 @@ typedef enum {
   TOKEN_WHILE,
   TOKEN_BREAK,
   TOKEN_CONTINUE,
-  // TODO:
-  // TOKEN_STATIC,
+  TOKEN_STATIC,
+  // TODO
   // TOKEN_PRIVATE,
   // TOKEN_WITH,
 

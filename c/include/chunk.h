@@ -70,6 +70,8 @@ typedef enum {
   OP_INHERIT,
   OP_METHOD,
   OP_METHOD_LONG,
+  OP_METHOD_STATIC,
+  OP_METHOD_STATIC_LONG,
 } OpCode;
 
 typedef struct {

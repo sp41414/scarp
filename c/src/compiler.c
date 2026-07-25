@@ -83,6 +83,8 @@ typedef enum {
   TYPE_LAMBDA
 } FunctionType;
 
+typedef enum { METHOD_NONE, METHOD_STATIC } MethodType;
+
 typedef struct Compiler {
   struct Compiler *enclosing;
   ObjFunction *function;
@@ -1279,19 +1281,31 @@ static void fnDeclaration(void) {
 }
 
 static void method(void) {
+  MethodType methodType = METHOD_NONE;
+  if (match(TOKEN_STATIC)) {
+    methodType = METHOD_STATIC;
+  }
+
   consume(TOKEN_IDENTIFIER, "Expect method name");
   Value name =
       OBJ_VAL(copyString(parser.previous.start, parser.previous.length));
   push(name);
 
-  FunctionType type = TYPE_METHOD;
+  FunctionType functionType = TYPE_METHOD;
   if (parser.previous.length == 4 &&
       memcmp(parser.previous.start, "init", 4) == 0) {
-    type = TYPE_INITIALIZER;
+    if (methodType == METHOD_STATIC) {
+      error("Cannot define initializer method as static");
+    }
+    functionType = TYPE_INITIALIZER;
   }
-  function(type);
+  function(functionType);
 
-  emitConstant(OP_METHOD, name);
+  if (methodType == METHOD_NONE) {
+    emitConstant(OP_METHOD, name);
+  } else {
+    emitConstant(OP_METHOD_STATIC, name);
+  }
 
   pop();
 }
