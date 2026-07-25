@@ -494,6 +494,24 @@ static InterpretResult run(void) {
       push(frame->slots[slot]);
       break;
     }
+    case OP_GET_BASE: {
+      Value name = READ_CONSTANT();
+      ObjClass *baseclass = AS_CLASS(pop());
+
+      if (!bindMethod(baseclass, name)) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      break;
+    }
+    case OP_GET_BASE_LONG: {
+      Value name = READ_CONSTANT_LONG();
+      ObjClass *baseclass = AS_CLASS(pop());
+
+      if (!bindMethod(baseclass, name)) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      break;
+    }
     case OP_GET_GLOBAL: {
       Value value = vm.globalValues.values[READ_BYTE()];
       if (IS_UNDEFINED(value)) {
@@ -761,6 +779,31 @@ static InterpretResult run(void) {
       ip = frame->ip;
       break;
     }
+    case OP_BASE_INVOKE: {
+      Value method = READ_CONSTANT();
+      int argCount = READ_BYTE();
+      ObjClass *superclass = AS_CLASS(pop());
+      frame->ip = ip;
+      if (!invokeFromClass(superclass, method, argCount)) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      frame = &vm.frames[vm.frameCount - 1];
+      frameFunction = getFrameFunction(frame);
+      ip = frame->ip;
+      break;
+    }
+    case OP_BASE_INVOKE_LONG: {
+      Value method = READ_CONSTANT_LONG();
+      int argCount = READ_BYTE();
+      ObjClass *superclass = AS_CLASS(pop());
+      if (!invokeFromClass(superclass, method, argCount)) {
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      frame = &vm.frames[vm.frameCount - 1];
+      frameFunction = getFrameFunction(frame);
+      ip = frame->ip;
+      break;
+    }
     case OP_CLOSURE: {
       ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
       ObjClosure *closure = newClosure(function);
@@ -887,6 +930,22 @@ static InterpretResult run(void) {
     case OP_CLASS_LONG:
       push(OBJ_VAL(newClass(READ_STRING_LONG())));
       break;
+    case OP_INHERIT: {
+      Value baseclass = peek(1);
+      if (!IS_CLASS(baseclass)) {
+        runtimeError("Base must be a class");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      ObjClass *subclass = AS_CLASS(peek(0));
+
+      tableAddAll(&AS_CLASS(baseclass)->methods, &subclass->methods);
+      if (AS_CLASS(baseclass)->initializer != NULL) {
+        subclass->initializer = AS_CLASS(baseclass)->initializer;
+      }
+
+      pop();
+      break;
+    }
     case OP_METHOD:
       defineMethod(READ_CONSTANT());
       break;

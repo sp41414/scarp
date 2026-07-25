@@ -182,7 +182,7 @@ static TokenType identifierType(void) {
     case 'r':
       return checkKeyword(2, 3, "eak", TOKEN_BREAK);
     case 'a':
-      return checkKeyword(2, 2, "ase", TOKEN_BASE);
+      return checkKeyword(2, 2, "se", TOKEN_BASE);
     }
     break;
   case 'c':
