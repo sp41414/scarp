@@ -83,8 +83,6 @@ typedef enum {
   TYPE_LAMBDA
 } FunctionType;
 
-typedef enum { METHOD_NONE, METHOD_STATIC } MethodType;
-
 typedef struct Compiler {
   struct Compiler *enclosing;
   ObjFunction *function;
@@ -1281,7 +1279,7 @@ static void fnDeclaration(void) {
 }
 
 static void method(void) {
-  MethodType methodType = METHOD_NONE;
+  MethodFlags methodType = METHOD_NONE;
   if (match(TOKEN_STATIC)) {
     methodType = METHOD_STATIC;
   }
@@ -1301,11 +1299,8 @@ static void method(void) {
   }
   function(functionType);
 
-  if (methodType == METHOD_NONE) {
-    emitConstant(OP_METHOD, name);
-  } else {
-    emitConstant(OP_METHOD_STATIC, name);
-  }
+  emitConstant(OP_METHOD, name);
+  emitByte(methodType);
 
   pop();
 }

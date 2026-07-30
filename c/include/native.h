@@ -13,5 +13,6 @@ bool readFileNative(Value *args);
 bool writeFileNative(Value *args);
 bool getenvNative(Value *args);
 bool assertNative(Value *args);
+bool sleepNative(Value *args);
 
 #endif

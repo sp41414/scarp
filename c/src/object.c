@@ -24,6 +24,13 @@ static Obj *allocateObject(size_t size, ObjType type) {
   return object;
 }
 
+ObjMethod *newMethod(Obj *function, MethodFlags flags) {
+  ObjMethod *method = ALLOCATE_OBJ(ObjMethod, OBJ_METHOD);
+  method->function = function;
+  method->flags = flags;
+  return method;
+}
+
 ObjBoundMethod *newBoundMethod(Value receiver, Obj *method) {
   ObjBoundMethod *bound = ALLOCATE_OBJ(ObjBoundMethod, OBJ_BOUND_METHOD);
   bound->receiver = receiver;
@@ -43,7 +50,6 @@ ObjClass *newClass(ObjString *name) {
   cls->name = name;
   cls->initializer = NULL;
   initTable(&cls->methods);
-  initTable(&cls->staticMethods);
   return cls;
 }
 

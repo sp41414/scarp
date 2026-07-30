@@ -164,7 +164,6 @@ bool getenvNative(Value *args) {
 }
 
 bool assertNative(Value *args) {
-
   bool eval = AS_BOOL(args[0]);
   if (eval) {
     args[-1] = BOOL_VAL(true);
@@ -173,6 +172,16 @@ bool assertNative(Value *args) {
 
   args[-1] = args[1];
   return false;
+}
+
+bool sleepNative(Value *args) {
+  if (!IS_NUMBER(args[0])) {
+    args[-1] = OBJ_VAL(COPY_LITERAL("Must specify first argument in seconds"));
+    return false;
+  }
+  double secs = AS_NUMBER(args[0]);
+  args[-1] = NUMBER_VAL(sleep(secs));
+  return true;
 }
 
 void defineNativeFns(void) {
@@ -185,4 +194,5 @@ void defineNativeFns(void) {
   defineNative("writeFile", writeFileNative, 2);
   defineNative("getenv", getenvNative, 1);
   defineNative("assert", assertNative, 2);
+  defineNative("sleep", sleepNative, 1);
 }

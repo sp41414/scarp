@@ -329,21 +329,13 @@ static void closeUpvalues(Value *last) {
   }
 }
 
-static void defineMethod(Value name) {
-  Value method = peek(0);
+static void defineMethod(Value name, MethodFlags flags) {
+  Obj *function = AS_OBJ(peek(0));
+  ObjMethod *method = newMethod(function, flags);
   ObjClass *cls = AS_CLASS(peek(1));
-  tableSet(&cls->methods, name, method);
+  tableSet(&cls->methods, name, OBJ_VAL(method));
   if (AS_STRING(name) == vm.initString)
-    cls->initializer = AS_OBJ(method);
-  pop();
-}
-
-static void defineStaticMethod(Value name) {
-  Value method = peek(0);
-  ObjClass *cls = AS_CLASS(peek(1));
-  tableSet(&cls->staticMethods, name, method);
-  if (AS_STRING(name) == vm.initString)
-    runtimeError("Cannot define initializer method as static");
+    cls->initializer = function;
   pop();
 }
 
@@ -366,6 +358,11 @@ static bool invokeFromClass(ObjClass *cls, Value name, int argCount) {
     runtimeError("Undefined property '%s'.", AS_CSTRING(name));
     return false;
   }
+  if (AS_METHOD(method)->flags == METHOD_STATIC) {
+    runtimeError("Cannot call static method '%s' from instance",
+                 AS_CSTRING(name));
+    return false;
+  }
   return call(AS_OBJ(method), argCount);
 }
 
@@ -373,11 +370,11 @@ static bool invoke(Value name, int argCount) {
   Value receiver = peek(argCount);
   if (IS_CLASS(receiver)) {
     ObjClass *cls = AS_CLASS(receiver);
+    Value value;
 
-    Value staticMethod;
-    if (tableGet(&cls->staticMethods, name, &staticMethod)) {
-      vm.stackTop[-argCount - 1] = staticMethod;
-      return call(AS_OBJ(staticMethod), argCount);
+    if (tableGet(&cls->methods, name, &value)) {
+      vm.stackTop[-argCount - 1] = value;
+      return call(AS_METHOD(value)->function, argCount);
     }
 
     runtimeError("Undefined static method '%s'", AS_CSTRING(name));
@@ -424,17 +421,6 @@ static int32_t toInt32(double d) {
     modded += UINT32_MAX + 1.0;
   uint32_t u = (uint32_t)modded;
   return (int32_t)u;
-}
-
-static bool getStaticMethod(ObjClass *cls, Value name) {
-  Value staticMethod;
-  if (!tableGet(&cls->staticMethods, name, &staticMethod)) {
-    runtimeError("Undefined static method '%s'", AS_CSTRING(name));
-    return false;
-  }
-  pop();
-  push(staticMethod);
-  return true;
 }
 
 static InterpretResult run(void) {
@@ -665,9 +651,17 @@ static InterpretResult run(void) {
         ObjClass *cls = AS_CLASS(peek(0));
         Value name = READ_CONSTANT();
 
-        if (!getStaticMethod(cls, name)) {
+        Value value;
+        if (!tableGet(&cls->methods, name, &value)) {
+          runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
+        if (AS_METHOD(value)->flags != METHOD_STATIC) {
+          runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        pop();
+        push(value);
         break;
       } else if (IS_INSTANCE(peek(0))) {
         ObjInstance *instance = AS_INSTANCE(peek(0));
@@ -707,9 +701,17 @@ static InterpretResult run(void) {
         ObjClass *cls = AS_CLASS(peek(0));
         Value name = READ_CONSTANT_LONG();
 
-        if (!getStaticMethod(cls, name)) {
+        Value value;
+        if (!tableGet(&cls->methods, name, &value)) {
+          runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
+        if (AS_METHOD(value)->flags != METHOD_STATIC) {
+          runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        pop();
+        push(value);
         break;
       } else if (IS_INSTANCE(peek(0))) {
         ObjInstance *instance = AS_INSTANCE(peek(0));
@@ -999,18 +1001,18 @@ static InterpretResult run(void) {
       pop();
       break;
     }
-    case OP_METHOD:
-      defineMethod(READ_CONSTANT());
+    case OP_METHOD: {
+      Value name = READ_CONSTANT();
+      MethodFlags flags = READ_BYTE();
+      defineMethod(name, flags);
       break;
-    case OP_METHOD_LONG:
-      defineMethod(READ_CONSTANT_LONG());
+    }
+    case OP_METHOD_LONG: {
+      Value name = READ_CONSTANT_LONG();
+      MethodFlags flags = READ_BYTE();
+      defineMethod(name, flags);
       break;
-    case OP_METHOD_STATIC:
-      defineStaticMethod(READ_CONSTANT());
-      break;
-    case OP_METHOD_STATIC_LONG:
-      defineStaticMethod(READ_CONSTANT_LONG());
-      break;
+    }
     }
   }
 
