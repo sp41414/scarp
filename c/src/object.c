@@ -138,8 +138,11 @@ static void printFunction(Obj *function) {
 
 void printObject(Value value) {
   switch (OBJ_TYPE(value)) {
+  case OBJ_METHOD:
+    printFunction(AS_METHOD(value)->function);
+    break;
   case OBJ_BOUND_METHOD:
-    printFunction(AS_BOUND_METHOD(value)->method);
+    printFunction(((ObjMethod *)AS_BOUND_METHOD(value)->method)->function);
     break;
   case OBJ_CLASS:
     printf("<class %s>", AS_CLASS(value)->name->chars);

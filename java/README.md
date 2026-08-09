@@ -655,8 +655,6 @@ The method is bound to the class and only callable within another method of the 
 
 Note that calling `ClassName.method()` from toplevel code will fail the privacy check.
 
-You can go a step further and use `static private method {}` using all three modifiers together.
-
 ```swift
 class MathUtils {
     static square(x) {

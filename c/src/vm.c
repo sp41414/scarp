@@ -22,12 +22,19 @@ static void resetStack(void) {
   vm.frameCount = 0;
 }
 
+static ObjFunction *asFunction(Obj *fn) {
+  return objType(fn) == OBJ_FUNCTION ? (ObjFunction *)fn
+                                     : ((ObjClosure *)fn)->function;
+}
+
 static inline ObjFunction *getFrameFunction(CallFrame *frame) {
-  if (objType(frame->function) == OBJ_FUNCTION) {
-    return (ObjFunction *)frame->function;
-  } else {
-    return ((ObjClosure *)frame->function)->function;
-  }
+  return asFunction(frame->function);
+}
+
+static ObjClass *getCurrentClass(void) {
+  if (vm.frameCount == 0)
+    return NULL;
+  return asFunction(vm.frames[vm.frameCount - 1].function)->owner;
 }
 
 static void runtimeError(const char *fmt, ...) {
@@ -232,10 +239,7 @@ static bool checkArgCount(int argCount, int arity) {
 }
 
 static bool call(Obj *callee, uint8_t argCount) {
-  ObjFunction *function = objType(callee) == OBJ_FUNCTION
-                              ? (ObjFunction *)callee
-                              : ((ObjClosure *)callee)->function;
-
+  ObjFunction *function = asFunction(callee);
   if (!checkArgCount(argCount, function->arity)) {
     return false;
   }
@@ -258,7 +262,7 @@ static bool callValue(Value callee, uint8_t argCount) {
     case OBJ_BOUND_METHOD: {
       ObjBoundMethod *bound = AS_BOUND_METHOD(callee);
       vm.stackTop[-argCount - 1] = bound->receiver;
-      return call(bound->method, argCount);
+      return call(((ObjMethod *)bound->method)->function, argCount);
     }
     case OBJ_CLASS: {
       ObjClass *cls = AS_CLASS(callee);
@@ -329,13 +333,28 @@ static void closeUpvalues(Value *last) {
   }
 }
 
+static void stampClassOwner(ObjFunction *fn, ObjClass *cls) {
+  if (fn->owner != NULL)
+    return;
+  fn->owner = cls;
+  for (int i = 0; i < fn->chunk.constants.count; ++i) {
+    Value v = fn->chunk.constants.values[i];
+    if (IS_FUNCTION(v)) {
+      stampClassOwner(AS_FUNCTION(v), cls);
+    }
+  }
+}
+
 static void defineMethod(Value name, MethodFlags flags) {
   Obj *function = AS_OBJ(peek(0));
-  ObjMethod *method = newMethod(function, flags);
   ObjClass *cls = AS_CLASS(peek(1));
+  stampClassOwner(asFunction(function), cls);
+  ObjMethod *method = newMethod(function, flags);
+  push(OBJ_VAL(method));
   tableSet(&cls->methods, name, OBJ_VAL(method));
   if (AS_STRING(name) == vm.initString)
     cls->initializer = function;
+  pop();
   pop();
 }
 
@@ -343,6 +362,18 @@ static bool bindMethod(ObjClass *cls, Value name) {
   Value method;
   if (!tableGet(&cls->methods, name, &method)) {
     runtimeError("Undefined property '%s'", AS_CSTRING(name));
+    return false;
+  }
+
+  MethodFlags flags = AS_METHOD(method)->flags;
+  if (flags & METHOD_STATIC) {
+    runtimeError("Cannot use 'self' or 'base' inside a static method");
+    return false;
+  }
+  if ((flags & METHOD_PRIVATE) &&
+      asFunction(AS_METHOD(method)->function)->owner != getCurrentClass()) {
+    runtimeError("Cannot access private method '%s' outside its defining class",
+                 AS_CSTRING(name));
     return false;
   }
 
@@ -358,12 +389,19 @@ static bool invokeFromClass(ObjClass *cls, Value name, int argCount) {
     runtimeError("Undefined property '%s'.", AS_CSTRING(name));
     return false;
   }
-  if (AS_METHOD(method)->flags == METHOD_STATIC) {
+  MethodFlags flags = AS_METHOD(method)->flags;
+  if (flags & METHOD_STATIC) {
     runtimeError("Cannot call static method '%s' from instance",
                  AS_CSTRING(name));
     return false;
   }
-  return call(AS_OBJ(method), argCount);
+  if ((flags & METHOD_PRIVATE) &&
+      asFunction(AS_METHOD(method)->function)->owner != getCurrentClass()) {
+    runtimeError("Cannot call private method '%s' outside its defining class",
+                 AS_CSTRING(name));
+    return false;
+  }
+  return call(AS_METHOD(method)->function, argCount);
 }
 
 static bool invoke(Value name, int argCount) {
@@ -373,6 +411,18 @@ static bool invoke(Value name, int argCount) {
     Value value;
 
     if (tableGet(&cls->methods, name, &value)) {
+      MethodFlags flags = AS_METHOD(value)->flags;
+      if (!(flags & METHOD_STATIC)) {
+        runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+        return false;
+      }
+      if ((flags & METHOD_PRIVATE) &&
+          asFunction(AS_METHOD(value)->function)->owner != getCurrentClass()) {
+        runtimeError(
+            "Cannot call private method '%s' outside its defining class",
+            AS_CSTRING(name));
+        return false;
+      }
       vm.stackTop[-argCount - 1] = value;
       return call(AS_METHOD(value)->function, argCount);
     }
@@ -656,7 +706,7 @@ static InterpretResult run(void) {
           runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
-        if (AS_METHOD(value)->flags != METHOD_STATIC) {
+        if (AS_METHOD(value)->flags < METHOD_STATIC) {
           runtimeError("Undefined static method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -706,7 +756,7 @@ static InterpretResult run(void) {
           runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
-        if (AS_METHOD(value)->flags != METHOD_STATIC) {
+        if (AS_METHOD(value)->flags < METHOD_STATIC) {
           runtimeError("Undefined static method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }

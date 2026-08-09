@@ -210,13 +210,13 @@ static TokenType identifierType(void) {
   case 'e':
     return checkKeyword(1, 3, "lse", TOKEN_ELSE);
   case 'f':
-    if (length > 1) {
-      switch (scanner.start[1]) {
-      case 'a':
-        return checkKeyword(2, 3, "lse", TOKEN_FALSE);
-      case 'o':
-        return checkKeyword(2, 1, "r", TOKEN_FOR);
-      }
+    if (length < 2)
+      break;
+    switch (scanner.start[1]) {
+    case 'a':
+      return checkKeyword(2, 3, "lse", TOKEN_FALSE);
+    case 'o':
+      return checkKeyword(2, 1, "r", TOKEN_FOR);
     }
     return checkKeyword(1, 1, "n", TOKEN_FUNCTION);
   case 'i':
@@ -226,7 +226,15 @@ static TokenType identifierType(void) {
   case 'n':
     return checkKeyword(1, 2, "il", TOKEN_NIL);
   case 'p':
-    return checkKeyword(1, 4, "rint", TOKEN_PRINT);
+    if (length < 4)
+      break;
+    switch (scanner.start[3]) {
+    case 'n':
+      return checkKeyword(4, 1, "t", TOKEN_PRINT);
+    case 'v':
+      return checkKeyword(4, 3, "ate", TOKEN_PRIVATE);
+    }
+    break;
   case 'r':
     return checkKeyword(1, 2, "et", TOKEN_RETURN);
   case 's':
@@ -244,7 +252,14 @@ static TokenType identifierType(void) {
   case 't':
     return checkKeyword(1, 3, "rue", TOKEN_TRUE);
   case 'w':
-    return checkKeyword(1, 4, "hile", TOKEN_WHILE);
+    if (length < 2)
+      break;
+    switch (scanner.start[1]) {
+    case 'h':
+      return checkKeyword(2, 3, "ile", TOKEN_WHILE);
+    case 'i':
+      return checkKeyword(2, 2, "th", TOKEN_WITH);
+    }
   }
   return TOKEN_IDENTIFIER;
 }

@@ -765,6 +765,8 @@ ParseRule rules[] = {
     [TOKEN_SWITCH] = {NULL, NULL, PREC_NONE},
     [TOKEN_BREAK] = {NULL, NULL, PREC_NONE},
     [TOKEN_CONTINUE] = {NULL, NULL, PREC_NONE},
+    [TOKEN_PRIVATE] = {NULL, NULL, PREC_NONE},
+    [TOKEN_WITH] = {NULL, NULL, PREC_NONE},
     [TOKEN_ERROR] = {NULL, NULL, PREC_NONE},
     [TOKEN_EOF] = {NULL, NULL, PREC_NONE},
 };
@@ -1280,8 +1282,11 @@ static void fnDeclaration(void) {
 
 static void method(void) {
   MethodFlags methodType = METHOD_NONE;
-  if (match(TOKEN_STATIC)) {
-    methodType = METHOD_STATIC;
+  while (match(TOKEN_STATIC) || match(TOKEN_PRIVATE)) {
+    if (parser.previous.type == TOKEN_STATIC)
+      methodType |= METHOD_STATIC;
+    else if (parser.previous.type == TOKEN_PRIVATE)
+      methodType |= METHOD_PRIVATE;
   }
 
   consume(TOKEN_IDENTIFIER, "Expect method name");
@@ -1292,8 +1297,8 @@ static void method(void) {
   FunctionType functionType = TYPE_METHOD;
   if (parser.previous.length == 4 &&
       memcmp(parser.previous.start, "init", 4) == 0) {
-    if (methodType == METHOD_STATIC) {
-      error("Cannot define initializer method as static");
+    if (methodType != METHOD_NONE) {
+      error("Cannot define initializer method as static or private");
     }
     functionType = TYPE_INITIALIZER;
   }

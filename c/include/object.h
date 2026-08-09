@@ -33,6 +33,8 @@
 #define AS_STRING(value) ((ObjString *)AS_OBJ(value))
 #define AS_CSTRING(value) (((ObjString *)AS_OBJ(value))->chars)
 
+#define METHOD_STATIC_PRIVATE (METHOD_STATIC | METHOD_PRIVATE)
+
 typedef enum {
   OBJ_METHOD,
   OBJ_BOUND_METHOD,
@@ -47,8 +49,8 @@ typedef enum {
 
 typedef enum {
   METHOD_NONE,
-  METHOD_STATIC,
   METHOD_PRIVATE,
+  METHOD_STATIC,
 } MethodFlags;
 
 struct Obj {
@@ -59,12 +61,15 @@ struct Obj {
   uint64_t header;
 };
 
+typedef struct ObjClass ObjClass;
+
 typedef struct {
   Obj obj;
   int arity;
   int upvalueCount;
   Chunk chunk;
   ObjString *name;
+  ObjClass *owner;
 } ObjFunction;
 
 typedef bool (*NativeFn)(Value *args);
@@ -102,12 +107,12 @@ typedef struct {
   Obj *function;
 } ObjMethod;
 
-typedef struct {
+struct ObjClass {
   Obj obj;
   ObjString *name;
   Table methods;
   Obj *initializer;
-} ObjClass;
+};
 
 typedef struct {
   Obj obj;
