@@ -604,6 +604,8 @@ If multiple methods with the same name are defined in every mixin, the last mixi
 You can combine single inheritance with mixins.
 If a mixin method has the same name as a method from the inherited base class, the mixin method wins.
 
+A maximum of 255 classes can be mixed in
+
 ```swift
 class Logger {
     log() {

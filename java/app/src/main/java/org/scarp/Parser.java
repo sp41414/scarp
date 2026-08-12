@@ -115,9 +115,13 @@ public class Parser {
 
         List<Expr.Variable> mixins = new ArrayList<>();
         if (match(WITH)) {
+            int count = 0;
             do {
+                if (count > 255)
+                    throw error(peek(), "Cannot mixin more than 255 classes");
                 consume(IDENTIFIER, "Expect mixin class name.");
                 mixins.add(new Expr.Variable(previous()));
+                count++;
             } while (match(COMMA));
         }
 

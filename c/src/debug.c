@@ -258,6 +258,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return invokeInstruction("OP_BASE_INVOKE", chunk, offset);
   case OP_BASE_INVOKE_LONG:
     return longInvokeInstruction("OP_BASE_INVOKE_LONG", chunk, offset);
+  case OP_LOAD_BASE:
+    return simpleInstruction("OP_LOAD_BASE", offset);
   case OP_CLOSURE:
     return closureInstruction(chunk, offset);
   case OP_CLOSURE_LONG:
@@ -290,6 +292,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
     return simpleInstruction("OP_BIN_SHIFT_LEFT", offset);
   case OP_INHERIT:
     return simpleInstruction("OP_INHERIT", offset);
+  case OP_MIXIN:
+    return byteInstruction("OP_MIXIN", chunk, offset);
   case OP_METHOD:
     return constantInstruction("OP_METHOD", chunk, offset) + 1;
   case OP_METHOD_LONG:

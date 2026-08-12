@@ -49,6 +49,7 @@ ObjClass *newClass(ObjString *name) {
   ObjClass *cls = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
   cls->name = name;
   cls->initializer = NULL;
+  cls->base = NULL;
   initTable(&cls->methods);
   return cls;
 }
@@ -71,6 +72,7 @@ ObjFunction *newFunction(void) {
   function->arity = 0;
   function->upvalueCount = 0;
   function->name = NULL;
+  function->owner = NULL;
   initChunk(&function->chunk);
   return function;
 }

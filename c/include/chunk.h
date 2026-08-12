@@ -59,6 +59,7 @@ typedef enum {
   OP_CALL,
   OP_INVOKE,
   OP_INVOKE_LONG,
+  OP_LOAD_BASE,
   OP_BASE_INVOKE,
   OP_BASE_INVOKE_LONG,
   OP_CLOSURE,
@@ -68,6 +69,7 @@ typedef enum {
   OP_CLASS,
   OP_CLASS_LONG,
   OP_INHERIT,
+  OP_MIXIN,
   OP_METHOD,
   OP_METHOD_LONG,
 } OpCode;

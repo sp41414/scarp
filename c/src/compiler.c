@@ -700,17 +700,18 @@ static void base(bool canAssign) {
 
   Value name =
       OBJ_VAL(copyString(parser.previous.start, parser.previous.length));
+  push(name);
 
-  namedVariable(syntheticToken("self"), false);
+  emitByte(OP_LOAD_BASE);
+
   if (match(TOKEN_LEFT_PAREN)) {
     uint8_t argCount = argumentList();
-    namedVariable(syntheticToken("base"), false);
     emitConstant(OP_BASE_INVOKE, name);
     emitByte(argCount);
   } else {
-    namedVariable(syntheticToken("base"), false);
     emitConstant(OP_GET_BASE, name);
   }
+  pop();
 }
 
 ParseRule rules[] = {
@@ -1340,26 +1341,37 @@ static void classDeclaration(void) {
       error("A class cannot inherit from itself");
     }
 
-    beginScope();
-    addLocal(false, syntheticToken("base"));
-    defineVariable(false, 0);
-
     namedVariable(name, false);
     emitByte(OP_INHERIT);
     classCompiler.hasBaseClass = true;
   }
 
   namedVariable(name, false);
+
+  if (match(TOKEN_WITH)) {
+    int count = 0;
+    do {
+      if (count > UINT8_MAX)
+        error("Cannot define more than 255 mixins");
+
+      consume(TOKEN_IDENTIFIER, "Expect mixin class name");
+      variable(false);
+      if (identifiersEqual(&name, &parser.previous)) {
+        error("A class cannot mixin itself");
+      }
+
+      count++;
+    } while (match(TOKEN_COMMA));
+
+    emitBytes(OP_MIXIN, count);
+  }
+
   consume(TOKEN_LEFT_BRACE, "Expect '{' before class body");
   while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
     method();
   }
   consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body");
   emitByte(OP_POP);
-
-  if (classCompiler.hasBaseClass) {
-    endScope();
-  }
 
   currentClass = currentClass->enclosing;
 }

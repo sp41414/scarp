@@ -112,6 +112,7 @@ struct ObjClass {
   ObjString *name;
   Table methods;
   Obj *initializer;
+  ObjClass *base;
 };
 
 typedef struct {

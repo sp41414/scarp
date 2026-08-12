@@ -370,8 +370,10 @@ static bool bindMethod(ObjClass *cls, Value name) {
     runtimeError("Cannot use 'self' or 'base' inside a static method");
     return false;
   }
+  ObjClass *current = getCurrentClass();
   if ((flags & METHOD_PRIVATE) &&
-      asFunction(AS_METHOD(method)->function)->owner != getCurrentClass()) {
+      asFunction(AS_METHOD(method)->function)->owner != current &&
+      cls != current) {
     runtimeError("Cannot access private method '%s' outside its defining class",
                  AS_CSTRING(name));
     return false;
@@ -395,8 +397,10 @@ static bool invokeFromClass(ObjClass *cls, Value name, int argCount) {
                  AS_CSTRING(name));
     return false;
   }
+  ObjClass *current = getCurrentClass();
   if ((flags & METHOD_PRIVATE) &&
-      asFunction(AS_METHOD(method)->function)->owner != getCurrentClass()) {
+      asFunction(AS_METHOD(method)->function)->owner != current &&
+      cls != current) {
     runtimeError("Cannot call private method '%s' outside its defining class",
                  AS_CSTRING(name));
     return false;
@@ -423,7 +427,6 @@ static bool invoke(Value name, int argCount) {
             AS_CSTRING(name));
         return false;
       }
-      vm.stackTop[-argCount - 1] = value;
       return call(AS_METHOD(value)->function, argCount);
     }
 
@@ -568,6 +571,7 @@ static InterpretResult run(void) {
       Value name = READ_CONSTANT();
       ObjClass *baseclass = AS_CLASS(pop());
 
+      frame->ip = ip;
       if (!bindMethod(baseclass, name)) {
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -577,6 +581,7 @@ static InterpretResult run(void) {
       Value name = READ_CONSTANT_LONG();
       ObjClass *baseclass = AS_CLASS(pop());
 
+      frame->ip = ip;
       if (!bindMethod(baseclass, name)) {
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -703,11 +708,23 @@ static InterpretResult run(void) {
 
         Value value;
         if (!tableGet(&cls->methods, name, &value)) {
+          frame->ip = ip;
           runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
-        if (AS_METHOD(value)->flags < METHOD_STATIC) {
+        MethodFlags flags = AS_METHOD(value)->flags;
+        if (!(flags & METHOD_STATIC)) {
+          frame->ip = ip;
           runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        if ((flags & METHOD_PRIVATE) &&
+            asFunction(AS_METHOD(value)->function)->owner !=
+                getCurrentClass()) {
+          frame->ip = ip;
+          runtimeError(
+              "Cannot access private method '%s' outside its defining class",
+              AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
         pop();
@@ -724,10 +741,12 @@ static InterpretResult run(void) {
           break;
         }
 
+        frame->ip = ip;
         if (!bindMethod(instance->cls, name)) {
           return INTERPRET_RUNTIME_ERROR;
         }
       } else {
+        frame->ip = ip;
         runtimeError("Only instances and classes have gettable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -736,6 +755,7 @@ static InterpretResult run(void) {
     }
     case OP_SET_PROPERTY: {
       if (!IS_INSTANCE(peek(1))) {
+        frame->ip = ip;
         runtimeError("Only instances have settable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -753,11 +773,23 @@ static InterpretResult run(void) {
 
         Value value;
         if (!tableGet(&cls->methods, name, &value)) {
+          frame->ip = ip;
           runtimeError("Undefined method '%s'", AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
-        if (AS_METHOD(value)->flags < METHOD_STATIC) {
+        MethodFlags flags = AS_METHOD(value)->flags;
+        if (!(flags & METHOD_STATIC)) {
+          frame->ip = ip;
           runtimeError("Undefined static method '%s'", AS_CSTRING(name));
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        if ((flags & METHOD_PRIVATE) &&
+            asFunction(AS_METHOD(value)->function)->owner !=
+                getCurrentClass()) {
+          frame->ip = ip;
+          runtimeError(
+              "Cannot access private method '%s' outside its defining class",
+              AS_CSTRING(name));
           return INTERPRET_RUNTIME_ERROR;
         }
         pop();
@@ -774,10 +806,12 @@ static InterpretResult run(void) {
           break;
         }
 
+        frame->ip = ip;
         if (!bindMethod(instance->cls, name)) {
           return INTERPRET_RUNTIME_ERROR;
         }
       } else {
+        frame->ip = ip;
         runtimeError("Only instances and classes have gettable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -785,6 +819,7 @@ static InterpretResult run(void) {
     }
     case OP_SET_PROPERTY_LONG: {
       if (!IS_INSTANCE(peek(1))) {
+        frame->ip = ip;
         runtimeError("Only instances have settable properties");
         return INTERPRET_RUNTIME_ERROR;
       }
@@ -901,12 +936,27 @@ static InterpretResult run(void) {
       Value method = READ_CONSTANT_LONG();
       int argCount = READ_BYTE();
       ObjClass *superclass = AS_CLASS(pop());
+      frame->ip = ip;
       if (!invokeFromClass(superclass, method, argCount)) {
         return INTERPRET_RUNTIME_ERROR;
       }
       frame = &vm.frames[vm.frameCount - 1];
       frameFunction = getFrameFunction(frame);
       ip = frame->ip;
+      break;
+    }
+    case OP_LOAD_BASE: {
+      Value self = frame->slots[0];
+      if (!IS_INSTANCE(self)) {
+        runtimeError("'base' can only be used inside an instance method");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      ObjInstance *instance = AS_INSTANCE(self);
+      if (!instance->cls->base) {
+        runtimeError("Class has no base class");
+        return INTERPRET_RUNTIME_ERROR;
+      }
+      push(OBJ_VAL(instance->cls->base));
       break;
     }
     case OP_CLOSURE: {
@@ -1038,10 +1088,12 @@ static InterpretResult run(void) {
     case OP_INHERIT: {
       Value baseclass = peek(1);
       if (!IS_CLASS(baseclass)) {
+        frame->ip = ip;
         runtimeError("Base must be a class");
         return INTERPRET_RUNTIME_ERROR;
       }
       ObjClass *subclass = AS_CLASS(peek(0));
+      subclass->base = AS_CLASS(baseclass);
 
       tableAddAll(&AS_CLASS(baseclass)->methods, &subclass->methods);
       if (AS_CLASS(baseclass)->initializer != NULL) {
@@ -1049,6 +1101,31 @@ static InterpretResult run(void) {
       }
 
       pop();
+      break;
+    }
+    case OP_MIXIN: {
+      uint8_t count = READ_BYTE();
+      ObjClass *subclass = AS_CLASS(peek(count));
+
+      for (int i = count; i > 0; i--) {
+        Value current = peek(i - 1);
+        if (!IS_CLASS(current)) {
+          frame->ip = ip;
+          runtimeError("Mixin must be a class");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+
+        ObjClass *mixin = AS_CLASS(current);
+        for (int j = 0; j < mixin->methods.capacity; j++) {
+          Entry *entry = &mixin->methods.entries[j];
+          if (IS_NIL(entry->key) || !IS_METHOD(entry->value) ||
+              AS_METHOD(entry->value)->flags & METHOD_PRIVATE)
+            continue;
+          tableSet(&subclass->methods, entry->key, entry->value);
+        }
+      }
+
+      vm.stackTop -= count;
       break;
     }
     case OP_METHOD: {
