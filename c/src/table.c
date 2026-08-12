@@ -66,7 +66,7 @@ static uint32_t hashValue(Value key) {
 }
 
 static Entry *findEntry(Entry *entries, int capacity, Value key) {
-  uint32_t idx = hashValue(key) % capacity;
+  uint32_t idx = hashValue(key) & (capacity - 1);
   Entry *tombstone = NULL;
 
   for (;;) {
@@ -82,7 +82,7 @@ static Entry *findEntry(Entry *entries, int capacity, Value key) {
       return entry;
     }
 
-    idx = (idx + 1) % capacity;
+    idx = (idx + 1) & (capacity - 1);
   }
 }
 
@@ -164,7 +164,7 @@ ObjString *tableFindString(Table *table, const char *chars, int length,
   if (table->count == 0)
     return NULL;
 
-  int idx = hash % table->capacity;
+  int idx = hash & (table->capacity - 1);
   for (;;) {
     Entry *entry = &table->entries[idx];
     if (IS_NIL(entry->key)) {
@@ -178,7 +178,7 @@ ObjString *tableFindString(Table *table, const char *chars, int length,
       }
     }
 
-    idx = (idx + 1) % table->capacity;
+    idx = (idx + 1) & (table->capacity - 1);
   }
 }
 
