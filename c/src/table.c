@@ -41,6 +41,27 @@ static uint32_t hashNumber(double key) {
 }
 
 static uint32_t hashValue(Value key) {
+#ifdef NAN_BOXING
+  if (IS_BOOL(key)) {
+    return AS_BOOL(key) ? 1 : 0;
+  } else if (IS_NUMBER(key)) {
+    return hashNumber(AS_NUMBER(key));
+  } else if (IS_OBJ(key)) {
+    if (IS_STRING(key)) {
+      return AS_STRING(key)->hash;
+    }
+    // murmurhash3 finalization mix
+    uint64_t bits = (uint64_t)(uintptr_t)AS_OBJ(key);
+    bits ^= bits >> 33;
+    bits *= 0xff51afd7ed558ccd;
+    bits ^= bits >> 33;
+    bits *= 0xc4ceb9fe1a85ec53;
+    bits ^= bits >> 33;
+    return (uint32_t)bits;
+  } else {
+    return 0;
+  }
+#else
   switch (key.type) {
   case VAL_NIL:
     return 0;
@@ -63,6 +84,7 @@ static uint32_t hashValue(Value key) {
   default:
     return 0;
   }
+#endif
 }
 
 static Entry *findEntry(Entry *entries, int capacity, Value key) {
